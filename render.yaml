@@ -16,7 +16,7 @@ services:
     region: oregon           # change to your preferred region (e.g. ohio, frankfurt, singapore)
     branch: main
     autoDeploy: true
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /
     envVars:
@@ -24,6 +24,8 @@ services:
         value: production
       - key: NODE_VERSION
         value: 20.18.0
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"          # ensures devDependencies (tsx, vite, esbuild, typescript) install during build
       - key: DB_PATH
         value: /data/iiv.db    # SQLite file lives on the persistent disk
     disk:
