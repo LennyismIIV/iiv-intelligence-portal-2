@@ -1,0 +1,32 @@
+# Render Blueprint for IIV Intelligence Portal
+# Docs: https://render.com/docs/blueprint-spec
+#
+# What this creates:
+#   - One web service (Node) that builds and runs the Express + Vite app
+#   - One persistent disk mounted at /data so the SQLite database survives redeploys
+#
+# After connecting this repo to Render via "New > Blueprint", these defaults
+# will be proposed automatically. You can adjust the plan or region before applying.
+
+services:
+  - type: web
+    name: iiv-intelligence-portal
+    runtime: node
+    plan: starter            # $7/mo, always-on, supports persistent disks
+    region: oregon           # change to your preferred region (e.g. ohio, frankfurt, singapore)
+    branch: main
+    autoDeploy: true
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: DB_PATH
+        value: /data/iiv.db    # SQLite file lives on the persistent disk
+    disk:
+      name: iiv-data
+      mountPath: /data         # must match the directory in DB_PATH above
+      sizeGB: 1                # plenty for SQLite; expand later if needed
