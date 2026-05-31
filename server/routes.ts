@@ -6,14 +6,104 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { log } from "./index";
 
+function buildCompanyPayload(item: any) {
+  return {
+    name: item.name || "",
+    description: item.description || null,
+    website: item.website || null,
+    category: item.category || null,
+    companyType: item.company_type || null,
+    competitionStatus: item.competition_status || null,
+    competitionYear: item.competition_year || null,
+    competitionEvent: item.competition_event || null,
+    yearFounded: item.year_founded || null,
+    employeeCount: item.employee_count || null,
+    estimatedRevenue: item.estimated_revenue || null,
+    maStatus: item.ma_status || null,
+    capitalRaised: item.capital_raised || null,
+    estimatedValuation: item.estimated_valuation || null,
+    gen2Relationship: item.gen2_relationship || null,
+    currentStatus: item.current_status || null,
+    notes: item.notes || null,
+    howItWorks: item.how_it_works || null,
+    businessNeed: item.business_need || null,
+    businessPotential: item.business_potential || null,
+    caseStudy: item.case_study || null,
+    workflowPrimary: item.workflow_primary || null,
+    workflowSecondary: item.workflow_secondary || null,
+    dataModalities: item.data_modalities || null,
+    aiPrimary: item.ai_primary || null,
+    aiSecondary: item.ai_secondary || null,
+    businessModel: item.business_model || null,
+    revenueStage: item.revenue_stage || null,
+    jtbdPrimary: item.jtbd_primary || null,
+    jtbdSecondary: item.jtbd_secondary || null,
+    buyerPrimary: item.buyer_primary || null,
+    marketsServed: null,
+    keyCustomers: null,
+    technologyStack: null,
+  };
+}
+
+async function reseedFromFile(): Promise<{ inserted: number; updated: number; total: number }> {
+  const seedPath = resolve(process.cwd(), "seed-data.json");
+  const rawData = readFileSync(seedPath, "utf-8");
+  const seedData = JSON.parse(rawData);
+
+  const existing = await storage.getCompanies({ limit: 100000 });
+  const byName = new Map<string, any>();
+  for (const c of existing.companies) {
+    if (c.name) byName.set(c.name.trim().toLowerCase(), c);
+  }
+
+  let inserted = 0;
+  let updated = 0;
+
+  for (const item of seedData) {
+    const payload = buildCompanyPayload(item);
+    const key = (item.name || "").trim().toLowerCase();
+    const existingRow = key ? byName.get(key) : undefined;
+
+    if (existingRow) {
+      await storage.updateCompany(existingRow.id, payload);
+      updated++;
+    } else {
+      const created = await storage.seedCompany(payload);
+      inserted++;
+      if (item.contacts && Array.isArray(item.contacts)) {
+        for (const contact of item.contacts) {
+          await storage.createContact({
+            companyId: created.id,
+            firstName: contact.first_name || null,
+            lastName: contact.last_name || null,
+            email: contact.email || null,
+            title: contact.title || null,
+            linkedinUrl: null,
+            phone: null,
+            isPrimary: 0,
+          });
+        }
+      }
+    }
+  }
+
+  return { inserted, updated, total: seedData.length };
+}
+
 async function seedDatabase() {
   const companyCount = await storage.getCompanyCount();
   if (companyCount > 0) {
-    log(`Database already has ${companyCount} companies, skipping seed.`);
+    log(`Database already has ${companyCount} companies, running upsert sync from seed-data.json...`);
+    try {
+      const result = await reseedFromFile();
+      log(`Upsert sync complete: ${result.inserted} inserted, ${result.updated} updated, ${result.total} total in file.`);
+    } catch (err: any) {
+      log(`Upsert sync error: ${err.message}`);
+    }
     return;
   }
 
-  log("Seeding database...");
+  log("Seeding database (empty DB)...");
   try {
     const seedPath = resolve(process.cwd(), "seed-data.json");
     const rawData = readFileSync(seedPath, "utf-8");
