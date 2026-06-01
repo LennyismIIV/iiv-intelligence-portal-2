@@ -358,12 +358,53 @@ export async function registerRoutes(
   });
 
   // POST /api/companies/:id/scores
+  // When evaluatorId is provided, upserts (replaces) the existing score for
+  // that (judge, lens, dimension) tuple. Without evaluatorId, falls back to
+  // legacy insert-only behavior so existing IIC scoring keeps working.
   app.post("/api/companies/:id/scores", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const scoreData = { ...req.body, companyId: id };
-      const score = await storage.createEvaluationScore(scoreData);
+      const score = scoreData.evaluatorId
+        ? await storage.upsertEvaluationScore(scoreData)
+        : await storage.createEvaluationScore(scoreData);
       res.status(201).json(score);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // GET /api/companies/:id/founder-session?evaluatorId=...
+  app.get("/api/companies/:id/founder-session", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const evaluatorId = req.query.evaluatorId as string | undefined;
+      if (!evaluatorId) {
+        return res.status(400).json({ message: "evaluatorId query param required" });
+      }
+      const session = await storage.getFounderSession(id, evaluatorId);
+      res.json(session ?? null);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // PUT /api/companies/:id/founder-session
+  // Body: { evaluatorId, architecture?, stage? }
+  app.put("/api/companies/:id/founder-session", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { evaluatorId, architecture, stage } = req.body || {};
+      if (!evaluatorId) {
+        return res.status(400).json({ message: "evaluatorId required" });
+      }
+      const session = await storage.upsertFounderSession({
+        companyId: id,
+        evaluatorId,
+        architecture: architecture ?? null,
+        stage: stage ?? null,
+      });
+      res.json(session);
     } catch (err: any) {
       res.status(400).json({ message: err.message });
     }

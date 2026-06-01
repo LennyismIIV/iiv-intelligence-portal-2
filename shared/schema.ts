@@ -126,6 +126,17 @@ export const lensConfigurations = sqliteTable("lens_configurations", {
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+// Per-judge per-company session metadata for the Founder lens.
+// Architecture and stage are tags only (not used in composite score).
+export const founderSessions = sqliteTable("founder_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  evaluatorId: text("evaluator_id").notNull(),
+  architecture: text("architecture"), // 'traditional' | 'hybrid' | 'zhc'
+  stage: text("stage"),                // 'pre-seed' | 'seed' | 'series-a'
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 // Insert schemas
 export const insertEvaluationScoreSchema = createInsertSchema(evaluationScores).omit({
   id: true,
@@ -137,8 +148,15 @@ export const insertLensConfigurationSchema = createInsertSchema(lensConfiguratio
   updatedAt: true,
 });
 
+export const insertFounderSessionSchema = createInsertSchema(founderSessions).omit({
+  id: true,
+  updatedAt: true,
+});
+
 // Types
 export type EvaluationScore = typeof evaluationScores.$inferSelect;
 export type InsertEvaluationScore = z.infer<typeof insertEvaluationScoreSchema>;
 export type LensConfiguration = typeof lensConfigurations.$inferSelect;
 export type InsertLensConfiguration = z.infer<typeof insertLensConfigurationSchema>;
+export type FounderSession = typeof founderSessions.$inferSelect;
+export type InsertFounderSession = z.infer<typeof insertFounderSessionSchema>;

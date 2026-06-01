@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { 
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, 
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -73,11 +74,108 @@ const THESIS_DIMENSIONS = [
   { key: "exit_clarity", label: "Exit Pathway Clarity", max: 5 },
 ];
 
+// Founder & Team Evaluation Rubric (29 sub-criteria across 6 domains).
+// Architecture multiplier removed — architecture is metadata only (per-judge tag).
+// Default value is null; only scored criteria contribute to the composite (Option C).
+const FOUNDER_DOMAINS = [
+  {
+    key: "domain1",
+    label: "Domain 1: Founder-Market Fit & Domain Authority",
+    weight: 0.20,
+    criteria: [
+      { key: "d1_1", label: "1.1 First-Hand Problem Experience", desc: "Has the founder personally experienced or operated within the problem domain?" },
+      { key: "d1_2", label: "1.2 Domain Tenure & Depth", desc: "Years of relevant domain exposure and demonstrated understanding of competitive dynamics." },
+      { key: "d1_3", label: "1.3 Proprietary Insight", desc: "Can the founder articulate a unique 'Why Now + Why Me' insight tied to macro trends or technology inflections?" },
+      { key: "d1_4", label: "1.4 Network Density in Domain", desc: "Quality and depth of relationships with potential customers, talent, partners, and competitive intelligence." },
+    ],
+  },
+  {
+    key: "domain2",
+    label: "Domain 2: Execution Capability & Operating Architecture",
+    weight: 0.20,
+    criteria: [
+      { key: "d2_1", label: "2.1 Track Record of Delivery", desc: "Evidence of shipping product, hitting milestones, or managing complexity to successful outcomes." },
+      { key: "d2_2", label: "2.2 AI/Automation Leverage Ratio", desc: "How systematically is AI embedded in workflows? Is it compound work or decorative?" },
+      { key: "d2_3", label: "2.3 Role Architecture Clarity", desc: "Can the founder clearly articulate who (or what) owns the roadmap, growth, and AI initiatives?" },
+      { key: "d2_4", label: "2.4 Capital-to-Milestone Discipline", desc: "Can the founder map capital allocation to specific, time-bound deliverables?" },
+      { key: "d2_5", label: "2.5 Velocity & Iteration Speed", desc: "Evidence of fast release cycles, rapid experimentation, and willingness to kill low-signal initiatives early." },
+    ],
+  },
+  {
+    key: "domain3",
+    label: "Domain 3: Psychological Fitness & Founder Resilience",
+    weight: 0.20,
+    criteria: [
+      { key: "d3_1", label: "3.1 Resilience & Stress Tolerance", desc: "Evidence of navigating prior setbacks, pivots, or operational crises without catastrophic decision-making." },
+      { key: "d3_2", label: "3.2 Coachability", desc: "Demonstrated willingness to seek, receive, and act on feedback from investors, customers, and teammates." },
+      { key: "d3_3", label: "3.3 Self-Awareness", desc: "Accurate self-assessment of personal strengths, blind spots, and the gap between current capabilities and role requirements." },
+      { key: "d3_4", label: "3.4 Emotional Intelligence (EQ)", desc: "Capacity to manage interpersonal dynamics, stakeholder relationships, and team culture under pressure." },
+      { key: "d3_5", label: "3.5 Decision Quality Under Uncertainty", desc: "Evidence of structured decision-making frameworks rather than reactive or emotionally driven choices." },
+    ],
+  },
+  {
+    key: "domain4",
+    label: "Domain 4: Team Completeness & Complementarity",
+    weight: 0.15,
+    criteria: [
+      { key: "d4_1", label: "4.1 Visionary/Operator Coverage", desc: "Does the team (human + AI) cover both big-picture strategy and day-to-day execution?" },
+      { key: "d4_2", label: "4.2 Technical-Commercial Balance", desc: "Presence of both technical depth (build capability) and commercial acumen (sell/grow capability)." },
+      { key: "d4_3", label: "4.3 Human-AI Governance Design", desc: "For hybrid/ZHC: does the founder have a clear capability map of what humans own vs. what agents do?" },
+      { key: "d4_4", label: "4.4 Team Cohesion & Chemistry", desc: "Interpersonal dynamics that enable rapid decision-making, healthy debate, and fast alignment on priorities." },
+      { key: "d4_5", label: "4.5 Key-Person Concentration Risk", desc: "Is the company dangerously dependent on a single founder? Are systems emerging beyond the founder?" },
+    ],
+  },
+  {
+    key: "domain5",
+    label: "Domain 5: Strategic Thinking & Narrative Quality",
+    weight: 0.15,
+    criteria: [
+      { key: "d5_1", label: "5.1 Problem Clarity & Acuity", desc: "Can the founder articulate the problem with precision \u2014 including who suffers, how acutely, and why existing solutions fail?" },
+      { key: "d5_2", label: "5.2 Moat Articulation", desc: "Can the founder name the defensibility mechanism and explain how it compounds with scale?" },
+      { key: "d5_3", label: "5.3 Why Now Coherence", desc: "Is there a credible structural tailwind (macro trend, regulatory shift, or technology inflection)?" },
+      { key: "d5_4", label: "5.4 Scenario Flexibility", desc: "Evidence that the founder has modeled multiple paths to success and can articulate pivot triggers." },
+      { key: "d5_5", label: "5.5 External Narrative Coherence", desc: "Can the founder tell a single coherent story across investor pitches, customer conversations, recruiting, and press \u2014 or does the narrative shift based on audience?" },
+    ],
+  },
+  {
+    key: "domain6",
+    label: "Domain 6: Scalability Signal & Organizational Design Potential",
+    weight: 0.10,
+    criteria: [
+      { key: "d6_1", label: "6.1 Revenue-Per-Capacity Design", desc: "Does the business model create a path to >$1M revenue per FTE equivalent (human or AI agent)?" },
+      { key: "d6_2", label: "6.2 Learning Loop Architecture", desc: "Has the founder built \u2014 or articulated plans for \u2014 continuous feedback systems that improve the product over time?" },
+      { key: "d6_3", label: "6.3 Organizational Leverage Model", desc: "Is the founder adding headcount or adding intelligent systems? Evidence of 'hire / automate / super-IC' evaluation." },
+      { key: "d6_4", label: "6.4 Governance & Accountability Design", desc: "Are accountability structures clear and durable as the company scales?" },
+      { key: "d6_5", label: "6.5 Talent/Agent Attraction Signal", desc: "Evidence that the founder can attract high-caliber human talent and/or design effective AI agent workflows." },
+    ],
+  },
+] as const;
+
+// Stable evaluator id stored in localStorage. Same browser = same judge identity.
+function getOrCreateEvaluatorId(): string {
+  if (typeof window === "undefined") return "anon";
+  const KEY = "iiv_evaluator_id";
+  let id = window.localStorage.getItem(KEY);
+  if (!id) {
+    id = "judge-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    window.localStorage.setItem(KEY, id);
+  }
+  return id;
+}
+
 export function LensSelector({ companyId, companyName }: LensSelectorProps) {
   const { toast } = useToast();
-  const [activeLens, setActiveLens] = useState<"iic" | "thesis" | "grid">("iic");
+  const [activeLens, setActiveLens] = useState<"iic" | "thesis" | "grid" | "momentum" | "grit" | "diligence" | "ai-native" | "valuation" | "founder">("iic");
   const [scores, setScores] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+
+  // ---- Founder lens state (per-judge, per-company persistence) ----
+  const evaluatorId = useMemo(() => getOrCreateEvaluatorId(), []);
+  const [founderScores, setFounderScores] = useState<Record<string, number>>({});
+  const [founderNA, setFounderNA] = useState<Record<string, boolean>>({});
+  const [founderNotes, setFounderNotes] = useState<Record<string, string>>({});
+  const [founderArchitecture, setFounderArchitecture] = useState<"traditional" | "hybrid" | "zhc">("hybrid");
+  const [founderStage, setFounderStage] = useState<"pre-seed" | "seed" | "series-a">("seed");
 
   // Fetch existing scores for IIC lens
   const { data: existingScores = [] } = useQuery<EvaluationScore[]>({
@@ -88,7 +186,62 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
     },
   });
 
-  // Mutation to save score
+  // Fetch this judge's existing founder scores + notes
+  const { data: founderRows = [] } = useQuery<EvaluationScore[]>({
+    queryKey: ["/api/companies", companyId, "scores", "founder"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/companies/${companyId}/scores?lens=founder`);
+      return res.json();
+    },
+  });
+
+  // Fetch this judge's architecture/stage selections
+  const { data: founderSession } = useQuery<any>({
+    queryKey: ["/api/companies", companyId, "founder-session", evaluatorId],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/companies/${companyId}/founder-session?evaluatorId=${encodeURIComponent(evaluatorId)}`);
+      return res.json();
+    },
+    enabled: !!companyId && !!evaluatorId,
+  });
+
+  // Hydrate founder local state from server when data lands.
+  // Only consider rows owned by THIS judge (evaluatorId match) so judges don't see each other's scores.
+  useEffect(() => {
+    if (!founderRows || founderRows.length === 0) return;
+    const mineNumeric: Record<string, number> = {};
+    const mineNA: Record<string, boolean> = {};
+    const mineNotes: Record<string, string> = {};
+    for (const row of founderRows) {
+      if (row.evaluatorId !== evaluatorId) continue;
+      // Notes rows are dimension="<domainKey>_note", score=0
+      if (row.dimension.endsWith("_note")) {
+        const domainKey = row.dimension.replace(/_note$/, "");
+        if (row.notes) mineNotes[domainKey] = row.notes;
+        continue;
+      }
+      // N/A rows are stored as score = -1 (sentinel; criteria scores are otherwise 0..5)
+      if (row.score < 0) {
+        mineNA[row.dimension] = true;
+      } else {
+        mineNumeric[row.dimension] = row.score;
+      }
+    }
+    setFounderScores(prev => ({ ...mineNumeric, ...prev })); // local edits win over server hydrate
+    setFounderNA(prev => ({ ...mineNA, ...prev }));
+    setFounderNotes(prev => ({ ...mineNotes, ...prev }));
+  // We deliberately hydrate only once per data arrival; prev-wins means later local edits aren't clobbered.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [founderRows, evaluatorId]);
+
+  useEffect(() => {
+    if (founderSession) {
+      if (founderSession.architecture) setFounderArchitecture(founderSession.architecture);
+      if (founderSession.stage) setFounderStage(founderSession.stage);
+    }
+  }, [founderSession]);
+
+  // Mutation to save score (IIC; legacy insert-only path, no evaluatorId)
   const saveScoreMutation = useMutation({
     mutationFn: async (scoreData: any) => {
       const res = await apiRequest("POST", `/api/companies/${companyId}/scores`, scoreData);
@@ -97,6 +250,35 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/companies", companyId, "scores"] });
       toast({ title: "Score saved", description: "Evaluation updated successfully." });
+    },
+  });
+
+  // Founder mutations — upsert path (evaluatorId always set)
+  const saveFounderScoreMutation = useMutation({
+    mutationFn: async (payload: { dimension: string; score: number; notes?: string }) => {
+      const res = await apiRequest("POST", `/api/companies/${companyId}/scores`, {
+        lensType: "founder",
+        evaluatorId,
+        ...payload,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies", companyId, "scores", "founder"] });
+    },
+  });
+
+  const saveFounderSessionMutation = useMutation({
+    mutationFn: async (payload: { architecture?: string; stage?: string }) => {
+      const res = await apiRequest("PUT", `/api/companies/${companyId}/founder-session`, {
+        evaluatorId,
+        architecture: payload.architecture ?? founderArchitecture,
+        stage: payload.stage ?? founderStage,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies", companyId, "founder-session", evaluatorId] });
     },
   });
 
@@ -127,6 +309,33 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
     return sum + s;
   }, 0) + (existingScores.find(s => s.dimension === "ai_moat")?.score || 0) + (existingScores.find(s => s.dimension === "category_creation")?.score || 0);
 
+  // Founder composite: Option C math — only scored, non-N/A criteria contribute.
+  // For each domain, compute the per-criteria average (0..5) across SCORED ones,
+  // then weight by domain weight and scale to 0..100. Domains with 0 scored criteria
+  // are excluded and remaining weights are renormalized so missing data doesn't drag the score to 0.
+  const founderComposite = useMemo(() => {
+    let weightedSum = 0;
+    let activeWeight = 0;
+    for (const domain of FOUNDER_DOMAINS) {
+      let total = 0;
+      let count = 0;
+      for (const c of domain.criteria) {
+        if (founderNA[c.key]) continue;
+        const v = founderScores[c.key];
+        if (typeof v !== "number") continue;
+        total += v;
+        count += 1;
+      }
+      if (count === 0) continue;
+      const domainAvg = total / count;            // 0..5
+      weightedSum += domainAvg * domain.weight;   // still 0..5 scale, weighted
+      activeWeight += domain.weight;
+    }
+    if (activeWeight === 0) return null;
+    const renormalized = weightedSum / activeWeight; // 0..5
+    return Math.round((renormalized / 5) * 100);     // 0..100
+  }, [founderScores, founderNA]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -138,7 +347,7 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
       </div>
 
       <Tabs value={activeLens} onValueChange={(v) => setActiveLens(v as any)}>
-        <TabsList className="grid w-full grid-cols-8 text-xs">
+        <TabsList className="grid w-full grid-cols-9 text-xs">
           <TabsTrigger value="iic">IIC</TabsTrigger>
           <TabsTrigger value="thesis">Thesis</TabsTrigger>
           <TabsTrigger value="grid">Grid</TabsTrigger>
@@ -147,6 +356,7 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
           <TabsTrigger value="diligence">Diligence</TabsTrigger>
           <TabsTrigger value="ai-native">AI-Native</TabsTrigger>
           <TabsTrigger value="valuation">Valuation</TabsTrigger>
+          <TabsTrigger value="founder">Founder</TabsTrigger>
         </TabsList>
 
         <TabsContent value="iic" className="space-y-6 mt-6">
@@ -993,6 +1203,163 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="founder" className="space-y-6 mt-6">
+          {/* Header: composite + judge identity */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-lg">Founder &amp; Team Evaluation</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    29 criteria across 6 weighted domains. Your scores only — other judges see their own.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-bold text-primary">
+                    {founderComposite === null ? "—" : `${founderComposite}%`}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Composite (scored only)</div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Operating Architecture (metadata only)</label>
+                  <div className="flex gap-2">
+                    {(["traditional", "hybrid", "zhc"] as const).map(arch => (
+                      <Button
+                        key={arch}
+                        type="button"
+                        size="sm"
+                        variant={founderArchitecture === arch ? "default" : "outline"}
+                        onClick={() => {
+                          setFounderArchitecture(arch);
+                          saveFounderSessionMutation.mutate({ architecture: arch, stage: founderStage });
+                        }}
+                      >
+                        {arch === "zhc" ? "ZHC" : arch.charAt(0).toUpperCase() + arch.slice(1)}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Stage</label>
+                  <div className="flex gap-2">
+                    {(["pre-seed", "seed", "series-a"] as const).map(stg => (
+                      <Button
+                        key={stg}
+                        type="button"
+                        size="sm"
+                        variant={founderStage === stg ? "default" : "outline"}
+                        onClick={() => {
+                          setFounderStage(stg);
+                          saveFounderSessionMutation.mutate({ architecture: founderArchitecture, stage: stg });
+                        }}
+                      >
+                        {stg === "series-a" ? "Series A" : stg.charAt(0).toUpperCase() + stg.slice(1)}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground italic">
+                Architecture is metadata only — no impact on the composite score (per Path C alignment).
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Per-domain scoring cards */}
+          {FOUNDER_DOMAINS.map(domain => (
+            <Card key={domain.key}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">{domain.label}</CardTitle>
+                  <Badge variant="outline" className="text-xs">
+                    Weight: {Math.round(domain.weight * 100)}%
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {domain.criteria.map(c => {
+                  const isNA = !!founderNA[c.key];
+                  const value = founderScores[c.key];
+                  return (
+                    <div key={c.key} className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium">{c.label}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{c.desc}</div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-sm font-mono w-8 text-right">
+                            {isNA ? "N/A" : typeof value === "number" ? value.toFixed(1) : "—"}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={isNA ? "default" : "outline"}
+                            onClick={() => {
+                              const next = !isNA;
+                              setFounderNA(prev => ({ ...prev, [c.key]: next }));
+                              if (next) {
+                                // Mark as N/A — store sentinel -1
+                                setFounderScores(prev => {
+                                  const copy = { ...prev };
+                                  delete copy[c.key];
+                                  return copy;
+                                });
+                                saveFounderScoreMutation.mutate({ dimension: c.key, score: -1 });
+                              } else {
+                                // Clearing N/A — remove the sentinel row by saving null-equivalent.
+                                // Simplest: just clear local state; user must set a real score to persist again.
+                                // For server cleanup, we save score=0 then expect them to slide it.
+                                saveFounderScoreMutation.mutate({ dimension: c.key, score: 0 });
+                                setFounderScores(prev => ({ ...prev, [c.key]: 0 }));
+                              }
+                            }}
+                          >
+                            N/A
+                          </Button>
+                        </div>
+                      </div>
+                      <Slider
+                        min={0}
+                        max={5}
+                        step={0.5}
+                        disabled={isNA}
+                        value={[typeof value === "number" ? value : 0]}
+                        onValueChange={(v) => {
+                          setFounderScores(prev => ({ ...prev, [c.key]: v[0] }));
+                        }}
+                        onValueCommit={(v) => {
+                          saveFounderScoreMutation.mutate({ dimension: c.key, score: v[0] });
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+                <div className="pt-2">
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Notes for this domain</label>
+                  <Textarea
+                    placeholder={`Observations on ${domain.label.split(":")[1]?.trim() || "this domain"}…`}
+                    value={founderNotes[domain.key] || ""}
+                    onChange={(e) => setFounderNotes(prev => ({ ...prev, [domain.key]: e.target.value }))}
+                    onBlur={(e) => {
+                      saveFounderScoreMutation.mutate({
+                        dimension: `${domain.key}_note`,
+                        score: 0,
+                        notes: e.target.value,
+                      });
+                    }}
+                    rows={3}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </TabsContent>
 
         <TabsContent value="thesis">

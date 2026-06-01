@@ -6,12 +6,13 @@ import {
   companyTags,
   type EvaluationScore, type InsertEvaluationScore, evaluationScores,
   type LensConfiguration, type InsertLensConfiguration, lensConfigurations,
+  type FounderSession, type InsertFounderSession, founderSessions,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
-import { eq, like, or, desc, asc, sql, count, inArray } from "drizzle-orm";
+import { eq, like, or, and, desc, asc, sql, count, inArray } from "drizzle-orm";
 
 // DB_PATH allows pointing the SQLite file at a persistent disk on Render.
 // Default to ./data.db in the working directory for local dev.
@@ -47,6 +48,16 @@ sqlite.exec(`
     is_default INTEGER DEFAULT 0,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS founder_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    evaluator_id TEXT NOT NULL,
+    architecture TEXT,
+    stage TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS founder_sessions_company_evaluator_idx
+    ON founder_sessions(company_id, evaluator_id);
 `);
 sqlite.pragma("journal_mode = WAL");
 
@@ -91,10 +102,15 @@ export interface IStorage {
   // Evaluation Lenses (Phase 1+)
   getEvaluationScores(companyId: number, lensType?: string): Promise<EvaluationScore[]>;
   createEvaluationScore(score: InsertEvaluationScore): Promise<EvaluationScore>;
+  upsertEvaluationScore(score: InsertEvaluationScore): Promise<EvaluationScore>;
   getLensConfiguration(lensType: string): Promise<LensConfiguration | undefined>;
   saveLensConfiguration(config: InsertLensConfiguration): Promise<LensConfiguration>;
   getEvaluationLeaderboard(lensType: string): Promise<any>;
   getEvaluationSummary(): Promise<any>;
+
+  // Founder lens session metadata (architecture/stage tags per judge per company)
+  getFounderSession(companyId: number, evaluatorId: string): Promise<FounderSession | undefined>;
+  upsertFounderSession(session: InsertFounderSession): Promise<FounderSession>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -366,6 +382,44 @@ export class DatabaseStorage implements IStorage {
 
   async createEvaluationScore(score: InsertEvaluationScore): Promise<EvaluationScore> {
     return db.insert(evaluationScores).values(score).returning().get();
+  }
+
+  // Upsert: replaces any row matching (companyId, lensType, dimension, evaluatorId).
+  // Falls back to plain insert when evaluatorId is null (legacy behavior).
+  async upsertEvaluationScore(score: InsertEvaluationScore): Promise<EvaluationScore> {
+    if (!score.evaluatorId) {
+      return db.insert(evaluationScores).values(score).returning().get();
+    }
+    db.delete(evaluationScores).where(
+      and(
+        eq(evaluationScores.companyId, score.companyId),
+        eq(evaluationScores.lensType, score.lensType),
+        eq(evaluationScores.dimension, score.dimension),
+        eq(evaluationScores.evaluatorId, score.evaluatorId),
+      )!,
+    ).run();
+    return db.insert(evaluationScores).values(score).returning().get();
+  }
+
+  async getFounderSession(companyId: number, evaluatorId: string): Promise<FounderSession | undefined> {
+    return db.select().from(founderSessions)
+      .where(and(eq(founderSessions.companyId, companyId), eq(founderSessions.evaluatorId, evaluatorId)))
+      .get();
+  }
+
+  async upsertFounderSession(session: InsertFounderSession): Promise<FounderSession> {
+    const existing = await this.getFounderSession(session.companyId, session.evaluatorId);
+    if (existing) {
+      return db.update(founderSessions)
+        .set({
+          architecture: session.architecture ?? null,
+          stage: session.stage ?? null,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(eq(founderSessions.id, existing.id))
+        .returning().get();
+    }
+    return db.insert(founderSessions).values(session).returning().get();
   }
 
   async getLensConfiguration(lensType: string): Promise<LensConfiguration | undefined> {
