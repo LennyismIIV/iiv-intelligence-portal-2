@@ -295,9 +295,11 @@ function FilterSelect({ label, value, onChange, options, testId }: {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All</SelectItem>
-          {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-          ))}
+          {options
+            .filter((opt) => opt.value !== null && opt.value !== undefined && String(opt.value).trim() !== "")
+            .map((opt) => (
+              <SelectItem key={String(opt.value)} value={String(opt.value)}>{opt.label}</SelectItem>
+            ))}
         </SelectContent>
       </Select>
     </div>
