@@ -39,6 +39,9 @@ export const companies = sqliteTable("companies", {
   marketsServed: text("markets_served"),
   keyCustomers: text("key_customers"),
   technologyStack: text("technology_stack"),
+  // Phase 1 CRM
+  leadSource: text("lead_source"),
+  pipelineStatus: text("pipeline_status").default("sourced"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -160,3 +163,41 @@ export type LensConfiguration = typeof lensConfigurations.$inferSelect;
 export type InsertLensConfiguration = z.infer<typeof insertLensConfigurationSchema>;
 export type FounderSession = typeof founderSessions.$inferSelect;
 export type InsertFounderSession = z.infer<typeof insertFounderSessionSchema>;
+
+// ===== Phase 1 CRM =====
+export const companyInteractions = sqliteTable("company_interactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  date: text("date").notNull(),
+  type: text("type").notNull(),
+  notes: text("notes"),
+  transcriptUrl: text("transcript_url"),
+  createdBy: text("created_by"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const companyFiles = sqliteTable("company_files", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  fileName: text("file_name").notNull(),
+  driveFileId: text("drive_file_id").notNull(),
+  driveUrl: text("drive_url").notNull(),
+  mimeType: text("mime_type"),
+  uploadedBy: text("uploaded_by"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertCompanyInteractionSchema = createInsertSchema(companyInteractions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCompanyFileSchema = createInsertSchema(companyFiles).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type CompanyInteraction = typeof companyInteractions.$inferSelect;
+export type InsertCompanyInteraction = z.infer<typeof insertCompanyInteractionSchema>;
+export type CompanyFile = typeof companyFiles.$inferSelect;
+export type InsertCompanyFile = z.infer<typeof insertCompanyFileSchema>;

@@ -15,6 +15,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Company, Contact, IntelligenceEvent } from "@shared/schema";
 import { LensSelector } from "@/components/LensSelector";
+import { CompanyInteractions } from "@/components/CompanyInteractions";
 
 interface CompanyWithRelations extends Company {
   contacts: Contact[];
@@ -109,6 +110,7 @@ export default function CompanyDetail() {
                 <TabsTrigger value="contacts">Contacts</TabsTrigger>
                 <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
                 <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
+                <TabsTrigger value="interactions">Interactions &amp; Files</TabsTrigger>
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
 
@@ -167,6 +169,10 @@ export default function CompanyDetail() {
 
               <TabsContent value="intelligence">
                 <IntelligenceTab companyId={company.id} events={company.events || []} />
+              </TabsContent>
+
+              <TabsContent value="interactions">
+                <CompanyInteractions companyId={company.id} />
               </TabsContent>
 
               <TabsContent value="evaluation">

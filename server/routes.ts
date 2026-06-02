@@ -455,5 +455,91 @@ export async function registerRoutes(
     }
   });
 
+  // ===== Phase 1 CRM: Interactions & Files =====
+  app.get("/api/companies/:id/interactions", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const interactions = await storage.getCompanyInteractions(id);
+      res.json(interactions);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/companies/:id/interactions", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { date, type, notes, transcriptUrl, createdBy } = req.body || {};
+      if (!date || !type) {
+        return res.status(400).json({ message: "date and type are required" });
+      }
+      const interaction = await storage.createCompanyInteraction({
+        companyId: id,
+        date,
+        type,
+        notes: notes || null,
+        transcriptUrl: transcriptUrl || null,
+        createdBy: createdBy || "team",
+      });
+      res.status(201).json(interaction);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/companies/:id/files", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const files = await storage.getCompanyFiles(id);
+      res.json(files);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Attach a Google Drive file by URL. We parse the file ID from the URL
+  // (supports /file/d/ID/, /open?id=ID, /uc?id=ID, /document/d/ID, /spreadsheets/d/ID, /presentation/d/ID).
+  app.post("/api/companies/:id/files", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { fileName, driveUrl, mimeType, uploadedBy } = req.body || {};
+      if (!fileName || !driveUrl) {
+        return res.status(400).json({ message: "fileName and driveUrl are required" });
+      }
+      const match = String(driveUrl).match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]{10,})/);
+      const driveFileId = match ? match[1] : driveUrl;
+      const file = await storage.createCompanyFile({
+        companyId: id,
+        fileName,
+        driveFileId,
+        driveUrl,
+        mimeType: mimeType || null,
+        uploadedBy: uploadedBy || "team",
+      });
+      res.status(201).json(file);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // Lightweight pipeline status update on the company itself.
+  app.patch("/api/companies/:id/pipeline", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { pipelineStatus, leadSource } = req.body || {};
+      const updates: any = {};
+      if (typeof pipelineStatus === "string") updates.pipelineStatus = pipelineStatus;
+      if (typeof leadSource === "string") updates.leadSource = leadSource;
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "Provide pipelineStatus or leadSource" });
+      }
+      const updated = await storage.updateCompany(id, updates);
+      if (!updated) return res.status(404).json({ message: "Company not found" });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
   return httpServer;
 }

@@ -7,6 +7,8 @@ import {
   type EvaluationScore, type InsertEvaluationScore, evaluationScores,
   type LensConfiguration, type InsertLensConfiguration, lensConfigurations,
   type FounderSession, type InsertFounderSession, founderSessions,
+  type CompanyInteraction, type InsertCompanyInteraction, companyInteractions,
+  type CompanyFile, type InsertCompanyFile, companyFiles,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -58,7 +60,38 @@ sqlite.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS founder_sessions_company_evaluator_idx
     ON founder_sessions(company_id, evaluator_id);
+  CREATE TABLE IF NOT EXISTS company_interactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    date TEXT NOT NULL,
+    type TEXT NOT NULL,
+    notes TEXT,
+    transcript_url TEXT,
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS company_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    file_name TEXT NOT NULL,
+    drive_file_id TEXT NOT NULL,
+    drive_url TEXT NOT NULL,
+    mime_type TEXT,
+    uploaded_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
 `);
+
+// Add Phase 1 CRM columns to existing companies table (idempotent).
+// SQLite doesn't support IF NOT EXISTS on ADD COLUMN, so check first.
+try {
+  const cols = sqlite.prepare("PRAGMA table_info(companies)").all() as Array<{ name: string }>;
+  const has = (n: string) => cols.some(c => c.name === n);
+  if (!has("lead_source")) sqlite.exec("ALTER TABLE companies ADD COLUMN lead_source TEXT");
+  if (!has("pipeline_status")) sqlite.exec("ALTER TABLE companies ADD COLUMN pipeline_status TEXT DEFAULT 'sourced'");
+} catch (e) {
+  console.error("[storage] Failed to add CRM columns:", e);
+}
 sqlite.pragma("journal_mode = WAL");
 
 export const db = drizzle(sqlite);
@@ -111,6 +144,12 @@ export interface IStorage {
   // Founder lens session metadata (architecture/stage tags per judge per company)
   getFounderSession(companyId: number, evaluatorId: string): Promise<FounderSession | undefined>;
   upsertFounderSession(session: InsertFounderSession): Promise<FounderSession>;
+
+  // Phase 1 CRM
+  getCompanyInteractions(companyId: number): Promise<CompanyInteraction[]>;
+  createCompanyInteraction(interaction: InsertCompanyInteraction): Promise<CompanyInteraction>;
+  getCompanyFiles(companyId: number): Promise<CompanyFile[]>;
+  createCompanyFile(file: InsertCompanyFile): Promise<CompanyFile>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -528,6 +567,29 @@ export class DatabaseStorage implements IStorage {
       totalScoresRecorded: allScores.length,
       byLens: lensSummary,
     };
+  }
+
+  // ===== Phase 1 CRM =====
+  async getCompanyInteractions(companyId: number): Promise<CompanyInteraction[]> {
+    return db.select().from(companyInteractions)
+      .where(eq(companyInteractions.companyId, companyId))
+      .orderBy(desc(companyInteractions.date))
+      .all();
+  }
+
+  async createCompanyInteraction(interaction: InsertCompanyInteraction): Promise<CompanyInteraction> {
+    return db.insert(companyInteractions).values(interaction).returning().get();
+  }
+
+  async getCompanyFiles(companyId: number): Promise<CompanyFile[]> {
+    return db.select().from(companyFiles)
+      .where(eq(companyFiles.companyId, companyId))
+      .orderBy(desc(companyFiles.createdAt))
+      .all();
+  }
+
+  async createCompanyFile(file: InsertCompanyFile): Promise<CompanyFile> {
+    return db.insert(companyFiles).values(file).returning().get();
   }
 }
 
