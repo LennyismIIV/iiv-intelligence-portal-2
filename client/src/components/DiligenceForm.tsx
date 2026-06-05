@@ -112,6 +112,12 @@ const SECTIONS: Section[] = [
 ];
 
 const ALL_QUESTIONS = SECTIONS.flatMap(s => s.questions);
+const DISPLAY_INDEX: Record<string, number> = Object.fromEntries(
+  ALL_QUESTIONS.map((q, i) => [q.id, i + 1])
+);
+function displayNumber(id: string): number {
+  return DISPLAY_INDEX[id] ?? 0;
+}
 
 interface DiligenceRow {
   id: number;
@@ -293,7 +299,7 @@ export function DiligenceForm({ companyId }: Props) {
                     <div key={q.id} className="space-y-2">
                       <label className="text-sm font-medium block">
                         <span className="text-muted-foreground mr-2">
-                          {q.id.replace("q", "")}.
+                          {displayNumber(q.id)}.
                         </span>
                         {q.label}
                       </label>
@@ -400,7 +406,7 @@ export function DiligenceForm({ companyId }: Props) {
                   return (
                     <div key={q.id}>
                       <div className="text-xs font-medium text-muted-foreground mb-1">
-                        {q.id.replace("q", "")}. {q.label}
+                        {displayNumber(q.id)}. {q.label}
                       </div>
                       <div className="text-sm whitespace-pre-wrap p-3 rounded-md bg-muted/40 border">
                         {v}
