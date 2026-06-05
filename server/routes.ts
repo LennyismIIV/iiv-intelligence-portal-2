@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage, db } from "./storage";
+import { storage, db, sqlite } from "./storage";
 import { companies, contacts, insertCompanySchema, insertContactSchema, insertIntelligenceEventSchema } from "@shared/schema";
 import { readFileSync } from "fs";
 import { resolve } from "path";
@@ -637,6 +637,50 @@ export async function registerRoutes(
       res.json(updated);
     } catch (err: any) {
       res.status(400).json({ message: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Admin: targeted row deletions for cleaning test data.
+  // Internal-only portal; no auth gate added. Useful for occasional maintenance.
+  // ---------------------------------------------------------------------------
+  app.delete("/api/admin/diligence/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = sqlite.prepare("DELETE FROM diligence_responses WHERE id = ?").run(id);
+      res.json({ deleted: result.changes });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/interactions/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = sqlite.prepare("DELETE FROM company_interactions WHERE id = ?").run(id);
+      res.json({ deleted: result.changes });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/files/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = sqlite.prepare("DELETE FROM company_files WHERE id = ?").run(id);
+      res.json({ deleted: result.changes });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/scores/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = sqlite.prepare("DELETE FROM evaluation_scores WHERE id = ?").run(id);
+      res.json({ deleted: result.changes });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 

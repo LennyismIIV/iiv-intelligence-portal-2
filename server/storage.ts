@@ -29,7 +29,7 @@ if (!fs.existsSync(dbPath) && fs.existsSync("data.db") && path.resolve(dbPath) !
   fs.copyFileSync("data.db", dbPath);
   console.log(`[storage] Seeded ${dbPath} from bundled data.db`);
 }
-const sqlite = new Database(dbPath);
+export const sqlite = new Database(dbPath);
 
 // Ensure required tables exist (idempotent). Safety net for fresh deploys
 // or older databases that pre-date the evaluation lenses schema.
@@ -106,6 +106,20 @@ try {
 } catch (e) {
   console.error("[storage] Failed to add CRM columns:", e);
 }
+
+// One-time data migration: legacy pipelineStatus values from Phase 1 ("diligence")
+// must map to the canonical Phase 2 enum value ("in_diligence"). Idempotent.
+try {
+  const result = sqlite
+    .prepare("UPDATE companies SET pipeline_status = 'in_diligence' WHERE pipeline_status = 'diligence'")
+    .run();
+  if (result.changes > 0) {
+    console.log(`[storage] Migrated ${result.changes} pipeline_status row(s): 'diligence' -> 'in_diligence'`);
+  }
+} catch (e) {
+  console.error("[storage] pipeline_status migration failed:", e);
+}
+
 sqlite.pragma("journal_mode = WAL");
 
 export const db = drizzle(sqlite);
