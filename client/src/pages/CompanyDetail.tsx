@@ -9,13 +9,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ExternalLink, ArrowLeft, Users, DollarSign, Calendar, Building2, Mail, Linkedin, Plus, Newspaper, GitCompareArrows, Pencil } from "lucide-react";
-import { useState } from "react";
+import { ExternalLink, ArrowLeft, Users, DollarSign, Calendar, Building2, Mail, Linkedin, Plus, Newspaper, GitCompareArrows, Pencil, Download, ClipboardList } from "lucide-react";
+import { useState, useEffect } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Company, Contact, IntelligenceEvent } from "@shared/schema";
 import { LensSelector } from "@/components/LensSelector";
 import { CompanyInteractions } from "@/components/CompanyInteractions";
+import { DiligenceForm } from "@/components/DiligenceForm";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface CompanyWithRelations extends Company {
   contacts: Contact[];
@@ -88,6 +91,32 @@ export default function CompanyDetail() {
               </div>
             </div>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 bg-white/10 border-white/20 text-white hover:bg-white/20"
+                data-testid="button-export-decile"
+                onClick={async () => {
+                  try {
+                    const res = await apiRequest("GET", `/api/companies/${company.id}/export/decile`);
+                    const data = await res.json();
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `decile-${(company.name || "company").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}-${new Date().toISOString().substring(0,10)}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    toast({ title: "Decile export downloaded" });
+                  } catch (e: any) {
+                    toast({ title: "Export failed", description: e?.message || "", variant: "destructive" });
+                  }
+                }}
+              >
+                <Download size={14} /> Export to Decile
+              </Button>
               <Link href="/compare">
                 <Button variant="outline" size="sm" className="gap-1.5 bg-white/10 border-white/20 text-white hover:bg-white/20" data-testid="button-compare">
                   <GitCompareArrows size={14} /> Compare
@@ -111,6 +140,7 @@ export default function CompanyDetail() {
                 <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
                 <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
                 <TabsTrigger value="interactions">Interactions &amp; Files</TabsTrigger>
+                <TabsTrigger value="diligence" data-testid="tab-diligence">Diligence</TabsTrigger>
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
 
@@ -179,6 +209,10 @@ export default function CompanyDetail() {
                 <LensSelector companyId={company.id} companyName={company.name} />
               </TabsContent>
 
+              <TabsContent value="diligence">
+                <DiligenceForm companyId={company.id} />
+              </TabsContent>
+
               <TabsContent value="notes">
                 <div className="space-y-4">
                   <Section title="Notes" content={company.notes || "No notes available."} />
@@ -190,7 +224,12 @@ export default function CompanyDetail() {
           </div>
 
           {/* Sidebar */}
-          <aside className="w-72 flex-shrink-0 hidden lg:block">
+          <aside className="w-72 flex-shrink-0 hidden lg:block space-y-4">
+            <PipelineStatusCard
+              companyId={company.id}
+              currentStatus={(company as any).pipelineStatus || null}
+              currentLeadSource={(company as any).leadSource || null}
+            />
             <Card className="bg-card border-border sticky top-6">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Quick Facts</CardTitle>
@@ -264,6 +303,159 @@ function QuickFact({ label, value }: { label: string; value: string }) {
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium text-right max-w-[140px] truncate">{value}</span>
     </div>
+  );
+}
+
+const PIPELINE_STATUSES = [
+  "sourced",
+  "contacted",
+  "meeting_scheduled",
+  "in_diligence",
+  "ic_review",
+  "invested",
+  "passed",
+  "on_hold",
+] as const;
+
+function PipelineStatusCard({
+  companyId,
+  currentStatus,
+  currentLeadSource,
+}: {
+  companyId: number;
+  currentStatus: string | null;
+  currentLeadSource: string | null;
+}) {
+  const { toast } = useToast();
+  const [status, setStatus] = useState<string>(currentStatus || "sourced");
+  const [leadSource, setLeadSource] = useState<string>(currentLeadSource || "");
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    setStatus(currentStatus || "sourced");
+    setLeadSource(currentLeadSource || "");
+    setDirty(false);
+  }, [currentStatus, currentLeadSource]);
+
+  const { data: leadSources = [] } = useQuery<string[]>({
+    queryKey: ["/api/lead-sources"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/lead-sources");
+      return res.json();
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PATCH", `/api/companies/${companyId}/pipeline`, {
+        pipelineStatus: status,
+        leadSource: leadSource,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies", String(companyId)] });
+      queryClient.invalidateQueries({ queryKey: ["/api/lead-sources"] });
+      setDirty(false);
+      toast({ title: "Status saved" });
+    },
+    onError: (e: any) => {
+      toast({ title: "Save failed", description: e?.message || "", variant: "destructive" });
+    },
+  });
+
+  const filtered = leadSources.filter(
+    (s) => s && s.toLowerCase().includes((leadSource || "").toLowerCase()) && s !== leadSource
+  );
+
+  return (
+    <Card className="bg-card border-border" data-testid="status-card">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <ClipboardList size={14} /> Status
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div>
+          <label className="text-xs text-muted-foreground mb-1.5 block">Pipeline Status</label>
+          <Select
+            value={status}
+            onValueChange={(v) => {
+              setStatus(v);
+              setDirty(true);
+            }}
+          >
+            <SelectTrigger data-testid="select-pipeline-status" className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PIPELINE_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s.replace(/_/g, " ")}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground mb-1.5 block">Lead Source</label>
+          <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Input
+                value={leadSource}
+                onChange={(e) => {
+                  setLeadSource(e.target.value);
+                  setDirty(true);
+                  setPopoverOpen(true);
+                }}
+                onFocus={() => setPopoverOpen(true)}
+                placeholder="e.g. IIEX 2026 winners"
+                data-testid="input-lead-source"
+                className="h-9"
+              />
+            </PopoverTrigger>
+            {filtered.length > 0 && (
+              <PopoverContent
+                className="p-0 w-[--radix-popover-trigger-width]"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+                align="start"
+              >
+                <Command>
+                  <CommandList>
+                    <CommandGroup>
+                      {filtered.slice(0, 8).map((s) => (
+                        <CommandItem
+                          key={s}
+                          value={s}
+                          onSelect={() => {
+                            setLeadSource(s);
+                            setDirty(true);
+                            setPopoverOpen(false);
+                          }}
+                          data-testid={`lead-source-option-${s}`}
+                        >
+                          {s}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            )}
+          </Popover>
+        </div>
+        <Button
+          size="sm"
+          className="w-full"
+          disabled={!dirty || saveMutation.isPending}
+          onClick={() => saveMutation.mutate()}
+          data-testid="button-save-status"
+        >
+          {saveMutation.isPending ? "Saving..." : "Save Status"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

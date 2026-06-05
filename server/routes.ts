@@ -522,6 +522,105 @@ export async function registerRoutes(
     }
   });
 
+  // Phase 2: Diligence (append-only versioned log, company-wide).
+  // GET returns history (newest first). ?latest=1 returns just the most recent row.
+  app.get("/api/companies/:id/diligence", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (req.query.latest === "1" || req.query.latest === "true") {
+        const row = await storage.getLatestDiligenceResponse(id);
+        return res.json(row || null);
+      }
+      const rows = await storage.getDiligenceResponses(id);
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/companies/:id/diligence", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { responses, filledBy, notes } = req.body || {};
+      if (!responses || typeof responses !== "object") {
+        return res.status(400).json({ message: "responses (object) required" });
+      }
+      const latest = await storage.getLatestDiligenceResponse(id);
+      const nextVersion = latest ? (latest.version || 0) + 1 : 1;
+      const saved = await storage.createDiligenceResponse({
+        companyId: id,
+        version: nextVersion,
+        responses: JSON.stringify(responses),
+        filledBy: filledBy || "team",
+        isExternal: 0,
+        notes: notes || null,
+      });
+      res.status(201).json(saved);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // Phase 2: lead source autocomplete (distinct non-empty values across companies).
+  app.get("/api/lead-sources", async (_req, res) => {
+    try {
+      const sources = await storage.getDistinctLeadSources();
+      res.json(sources);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Phase 2: Decile export — clean JSON bundle for a company.
+  app.get("/api/companies/:id/export/decile", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const company = await storage.getCompany(id);
+      if (!company) return res.status(404).json({ message: "Company not found" });
+
+      const [scores, interactions, files, diligence] = await Promise.all([
+        storage.getEvaluationScores(id),
+        storage.getCompanyInteractions(id),
+        storage.getCompanyFiles(id),
+        storage.getLatestDiligenceResponse(id),
+      ]);
+
+      // Group scores by lensType for readability.
+      const scoresByLens: Record<string, any[]> = {};
+      for (const s of scores) {
+        const lens = (s as any).lensType || "unknown";
+        if (!scoresByLens[lens]) scoresByLens[lens] = [];
+        scoresByLens[lens].push(s);
+      }
+
+      // Parse diligence responses JSON for the export (keep raw too).
+      let diligenceParsed: any = null;
+      if (diligence) {
+        let parsed: any = null;
+        try { parsed = JSON.parse(diligence.responses); } catch { parsed = diligence.responses; }
+        diligenceParsed = {
+          version: diligence.version,
+          filledBy: diligence.filledBy,
+          updatedAt: diligence.updatedAt,
+          responses: parsed,
+          notes: diligence.notes,
+        };
+      }
+
+      res.json({
+        exportedAt: new Date().toISOString(),
+        format: "iiv-decile-v1",
+        company,
+        scoresByLens,
+        diligence: diligenceParsed,
+        interactions,
+        files,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Lightweight pipeline status update on the company itself.
   app.patch("/api/companies/:id/pipeline", async (req, res) => {
     try {

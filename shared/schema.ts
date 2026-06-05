@@ -201,3 +201,27 @@ export type CompanyInteraction = typeof companyInteractions.$inferSelect;
 export type InsertCompanyInteraction = z.infer<typeof insertCompanyInteractionSchema>;
 export type CompanyFile = typeof companyFiles.$inferSelect;
 export type InsertCompanyFile = z.infer<typeof insertCompanyFileSchema>;
+
+// ===== Phase 2: Diligence =====
+// Append-only versioning: each save inserts a new row with version = max(version) + 1
+// for that companyId. Company-wide log (not per-evaluator) — filledBy carries who saved.
+export const diligenceResponses = sqliteTable("diligence_responses", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  version: integer("version").notNull().default(1),
+  responses: text("responses").notNull(),  // JSON string keyed by question id (q1..q19)
+  filledBy: text("filled_by"),             // evaluatorId (localStorage UUID)
+  isExternal: integer("is_external").default(0),
+  notes: text("notes"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertDiligenceResponseSchema = createInsertSchema(diligenceResponses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type DiligenceResponse = typeof diligenceResponses.$inferSelect;
+export type InsertDiligenceResponse = z.infer<typeof insertDiligenceResponseSchema>;

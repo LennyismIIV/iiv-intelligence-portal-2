@@ -9,6 +9,7 @@ import {
   type FounderSession, type InsertFounderSession, founderSessions,
   type CompanyInteraction, type InsertCompanyInteraction, companyInteractions,
   type CompanyFile, type InsertCompanyFile, companyFiles,
+  type DiligenceResponse, type InsertDiligenceResponse, diligenceResponses,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -80,6 +81,19 @@ sqlite.exec(`
     uploaded_by TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS diligence_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    version INTEGER NOT NULL DEFAULT 1,
+    responses TEXT NOT NULL,
+    filled_by TEXT,
+    is_external INTEGER DEFAULT 0,
+    notes TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS diligence_responses_company_version_idx
+    ON diligence_responses(company_id, version DESC);
 `);
 
 // Add Phase 1 CRM columns to existing companies table (idempotent).
@@ -150,6 +164,12 @@ export interface IStorage {
   createCompanyInteraction(interaction: InsertCompanyInteraction): Promise<CompanyInteraction>;
   getCompanyFiles(companyId: number): Promise<CompanyFile[]>;
   createCompanyFile(file: InsertCompanyFile): Promise<CompanyFile>;
+
+  // Phase 2 Diligence (append-only versioned log)
+  getDiligenceResponses(companyId: number): Promise<DiligenceResponse[]>;
+  getLatestDiligenceResponse(companyId: number): Promise<DiligenceResponse | undefined>;
+  createDiligenceResponse(payload: InsertDiligenceResponse): Promise<DiligenceResponse>;
+  getDistinctLeadSources(): Promise<string[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -590,6 +610,37 @@ export class DatabaseStorage implements IStorage {
 
   async createCompanyFile(file: InsertCompanyFile): Promise<CompanyFile> {
     return db.insert(companyFiles).values(file).returning().get();
+  }
+
+  // ===== Phase 2 Diligence =====
+  async getDiligenceResponses(companyId: number): Promise<DiligenceResponse[]> {
+    return db.select().from(diligenceResponses)
+      .where(eq(diligenceResponses.companyId, companyId))
+      .orderBy(desc(diligenceResponses.version))
+      .all();
+  }
+
+  async getLatestDiligenceResponse(companyId: number): Promise<DiligenceResponse | undefined> {
+    return db.select().from(diligenceResponses)
+      .where(eq(diligenceResponses.companyId, companyId))
+      .orderBy(desc(diligenceResponses.version))
+      .limit(1)
+      .get();
+  }
+
+  async createDiligenceResponse(payload: InsertDiligenceResponse): Promise<DiligenceResponse> {
+    return db.insert(diligenceResponses).values(payload).returning().get();
+  }
+
+  // Distinct non-empty lead_source values across all companies, for autocomplete.
+  async getDistinctLeadSources(): Promise<string[]> {
+    const rows = await db.selectDistinct({ leadSource: companies.leadSource })
+      .from(companies)
+      .all();
+    return rows
+      .map(r => r.leadSource)
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      .sort((a, b) => a.localeCompare(b));
   }
 }
 
