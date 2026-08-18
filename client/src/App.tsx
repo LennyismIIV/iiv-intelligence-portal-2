@@ -13,6 +13,7 @@ import CompanyDetail from "@/pages/CompanyDetail";
 import Compare from "@/pages/Compare";
 import SearchPage from "@/pages/SearchPage";
 import Evaluations from "@/pages/Evaluations";
+import Findings from "@/pages/Findings";
 
 function AppRouter() {
   return (
@@ -25,6 +26,7 @@ function AppRouter() {
           <Route path="/companies/:id" component={CompanyDetail} />
           <Route path="/compare" component={Compare} />
           <Route path="/evaluations" component={Evaluations} />
+          <Route path="/findings" component={Findings} />
           <Route path="/search" component={SearchPage} />
           <Route component={NotFound} />
         </Switch>

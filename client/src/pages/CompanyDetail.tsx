@@ -17,6 +17,9 @@ import type { Company, Contact, IntelligenceEvent } from "@shared/schema";
 import { LensSelector } from "@/components/LensSelector";
 import { CompanyInteractions } from "@/components/CompanyInteractions";
 import { DiligenceForm } from "@/components/DiligenceForm";
+import { FindingsLedger } from "@/components/FindingsLedger";
+import { GatesPanel } from "@/components/GatesPanel";
+import { VerdictBanner } from "@/components/VerdictBanner";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -128,11 +131,12 @@ export default function CompanyDetail() {
       </div>
 
       <div className="max-w-6xl mx-auto px-8 py-6">
+        <VerdictBanner companyId={company.id} />
         <div className="flex gap-6">
           {/* Main Content */}
           <div className="flex-1 min-w-0">
             <Tabs defaultValue="overview" className="w-full">
-              <TabsList className="w-full justify-start bg-muted/50 mb-4" data-testid="company-tabs">
+              <TabsList className="w-full justify-start bg-muted/50 mb-4 flex-wrap h-auto" data-testid="company-tabs">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="taxonomy">Taxonomy</TabsTrigger>
                 <TabsTrigger value="financials">Financials</TabsTrigger>
@@ -141,6 +145,7 @@ export default function CompanyDetail() {
                 <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
                 <TabsTrigger value="interactions">Interactions &amp; Files</TabsTrigger>
                 <TabsTrigger value="diligence" data-testid="tab-diligence">Diligence</TabsTrigger>
+                <TabsTrigger value="decision" data-testid="tab-decision">Decision Layer</TabsTrigger>
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
 
@@ -211,6 +216,13 @@ export default function CompanyDetail() {
 
               <TabsContent value="diligence">
                 <DiligenceForm companyId={company.id} />
+              </TabsContent>
+
+              <TabsContent value="decision">
+                <div className="space-y-6">
+                  <GatesPanel companyId={company.id} />
+                  <FindingsLedger companyId={company.id} />
+                </div>
               </TabsContent>
 
               <TabsContent value="notes">
