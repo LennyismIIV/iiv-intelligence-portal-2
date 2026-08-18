@@ -34,3 +34,4 @@ logs/
 # Misc
 .cache/
 .tmp/
+data.db

@@ -151,6 +151,126 @@ const FOUNDER_DOMAINS = [
   },
 ] as const;
 
+// ---------------------------------------------------------------------------
+// AI-Native Lens — the Compression Doctrine test.
+// Source: IIV_AI_Compression_Strategy_Recommendations (Aug 17, 2026)
+//
+// Central thesis: an AI-native company is investable only if it converts a
+// temporary capability window into a durable control point BEFORE
+// commoditization catches up. Everything below tests that.
+//
+// Composite = weighted 0..100.  Default weight split:
+//   Control Point Formation .... 50%   (Data 20 + Integration 15 + Benchmarks 8 + Distribution 7)
+//   Time & Compression ......... 20%   (Clock Margin scored dimension)
+//   Anti-Slop Guards ........... 30%   (Rapid Demand Capture)
+//
+// AI Feature Half-Life is a numeric input (months), NOT a scored dimension —
+// it feeds a hard warning banner when < 24 months with weak control-point evidence.
+// Category-Layer Fit is a categorical picker (not scored) that renders a
+// color-coded doctrine callout so the judge sees the doctrine's stance immediately.
+// ---------------------------------------------------------------------------
+const AI_NATIVE_DOMAINS = [
+  {
+    key: "time_compression",
+    label: "Section 1: Time & Compression",
+    weight: 0.20,
+    criteria: [
+      {
+        key: "clock_margin",
+        label: "1.1 Clock Margin (scaling+exit beat technology+adoption)",
+        desc: "Do the scaling and exit clocks beat the technology and adoption clocks with a defined buffer? A 24-month capability window is not a thesis; it is a variable in a timing model.",
+      },
+    ],
+  },
+  {
+    key: "control_point",
+    label: "Section 2: Control-Point Formation (the moat test)",
+    weight: 0.50,
+    criteria: [
+      {
+        key: "proprietary_data",
+        label: "2.1 Proprietary Data Rights",
+        desc: "Exclusive contractual data, longitudinal panels, consented behavioral, or hard-to-access populations. Test: is there a right the company OWNS that copycats cannot cheaply reproduce? (Public datasets don't count — see XPolls/ANES lesson.)",
+      },
+      {
+        key: "integration_governance",
+        label: "2.2 Embedded Integration & Governance",
+        desc: "Audit trail, permissions, system integration, workflow dependence. Test: are switching costs operational, not just interface familiarity?",
+      },
+      {
+        key: "benchmarked_quality",
+        label: "2.3 Independently Benchmarked Quality",
+        desc: "Validated performance advantage against public or incumbent baselines. Test: is there evidence beyond 'we use advanced AI' — e.g. published benchmarks, third-party validation, ground-truth comparisons?",
+      },
+      {
+        key: "distribution_channel",
+        label: "2.4 Distribution / Channel Advantage",
+        desc: "Preferential distribution or a genuine channel advantage a competitor would have to buy or rebuild. Introductions are not scarce; procurement pathways and buyer maps are.",
+      },
+    ],
+  },
+  {
+    key: "anti_slop",
+    label: "Section 3: Anti-Slop Guards (Rapid Demand Capture)",
+    weight: 0.30,
+    criteria: [
+      {
+        key: "demand_capture",
+        label: "3.1 Rapid Demand Capture Evidence",
+        desc: "Three-plus independent customers who articulate why they cannot build, wait, or buy broader software. Not pilots. Not intros. Actual evidence of non-DIY pain and paid renewal signal.",
+      },
+    ],
+  },
+] as const;
+
+// Category-Layer Fit — from the doctrine's Layer/AI-effect/Implication table.
+// Rendered as a picker with color-coded doctrine callout. Metadata only.
+const AI_CATEGORY_LAYERS = [
+  {
+    key: "generic_workflow",
+    label: "Generic workflow automation",
+    stance: "avoid",
+    guidance: "Build cost and feature copying collapse. Avoid unless the wedge rapidly creates a deeper control point.",
+  },
+  {
+    key: "vertical_agent",
+    label: "Vertical agent interface",
+    stance: "conditional",
+    guidance: "Can create value but platforms can absorb it. Invest only with exclusive distribution, integration, or data rights.",
+  },
+  {
+    key: "data_evidence",
+    label: "Data & evidence infrastructure",
+    stance: "attractive",
+    guidance: "Trusted inputs and evaluation become more valuable. Attractive where rights, provenance, refresh, and governance are real.",
+  },
+  {
+    key: "governance_audit",
+    label: "Governance / audit / compliance / permissions",
+    stance: "attractive",
+    guidance: "Autonomous production systems increase demand for trust and accountability. Attractive where switching costs become operational.",
+  },
+  {
+    key: "deployment_transformation",
+    label: "Deployment / managed transformation",
+    stance: "conditional",
+    guidance: "Demand expands because firms cannot self-implement reliably. More likely a software-plus-services or structured-revenue play.",
+  },
+  {
+    key: "category_leading_platform",
+    label: "Category-leading AI platform",
+    stance: "caution",
+    guidance: "Can scale rapidly; capital concentrates around very few winners. Do not mistake exceptional financing for an investable base rate.",
+  },
+] as const;
+
+const AI_STANCE_STYLES: Record<string, { badge: string; card: string; label: string }> = {
+  attractive: { badge: "bg-green-100 text-green-800 border-green-300", card: "border-green-200 bg-green-50", label: "Attractive" },
+  conditional: { badge: "bg-amber-100 text-amber-800 border-amber-300", card: "border-amber-200 bg-amber-50", label: "Conditional" },
+  caution: { badge: "bg-amber-100 text-amber-800 border-amber-300", card: "border-amber-200 bg-amber-50", label: "Caution" },
+  avoid: { badge: "bg-red-100 text-red-800 border-red-300", card: "border-red-200 bg-red-50", label: "Avoid" },
+};
+
 // Stable evaluator id stored in localStorage. Same browser = same judge identity.
 function getOrCreateEvaluatorId(): string {
   if (typeof window === "undefined") return "anon";
@@ -177,11 +297,27 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
   const [founderArchitecture, setFounderArchitecture] = useState<"traditional" | "hybrid" | "zhc">("hybrid");
   const [founderStage, setFounderStage] = useState<"pre-seed" | "seed" | "series-a">("seed");
 
+  // ---- AI-Native lens state (per-judge, per-company persistence) ----
+  const [aiScores, setAiScores] = useState<Record<string, number>>({});
+  const [aiNA, setAiNA] = useState<Record<string, boolean>>({});
+  const [aiNotes, setAiNotes] = useState<Record<string, string>>({});
+  const [aiHalfLife, setAiHalfLife] = useState<number | null>(null);   // months; null = unset
+  const [aiCategoryLayer, setAiCategoryLayer] = useState<string | null>(null);
+
   // Fetch existing scores for IIC lens
   const { data: existingScores = [] } = useQuery<EvaluationScore[]>({
     queryKey: ["/api/companies", companyId, "scores", "iic"],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/companies/${companyId}/scores?lens=iic`);
+      return res.json();
+    },
+  });
+
+  // Fetch this judge's existing AI-Native scores + notes
+  const { data: aiRows = [] } = useQuery<EvaluationScore[]>({
+    queryKey: ["/api/companies", companyId, "scores", "ai_native"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/companies/${companyId}/scores?lens=ai_native`);
       return res.json();
     },
   });
@@ -241,6 +377,49 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
     }
   }, [founderSession]);
 
+  // Hydrate AI-Native lens from server. Same conventions as Founder:
+  //   * only rows for this evaluatorId are considered (per-judge privacy)
+  //   * dimension ending in "_note" carries qualitative notes (score field ignored)
+  //   * score = -1 marks N/A
+  //   * two "meta" dimensions carry non-score data:
+  //       _meta_half_life  — score = months (or -1 if unset)
+  //       _meta_category_layer — notes = layer key
+  useEffect(() => {
+    if (!aiRows || aiRows.length === 0) return;
+    const mineNumeric: Record<string, number> = {};
+    const mineNA: Record<string, boolean> = {};
+    const mineNotes: Record<string, string> = {};
+    let hydratedHalfLife: number | null = null;
+    let hydratedLayer: string | null = null;
+    for (const row of aiRows) {
+      if (row.evaluatorId !== evaluatorId) continue;
+      if (row.dimension === "_meta_half_life") {
+        if (typeof row.score === "number" && row.score >= 0) hydratedHalfLife = row.score;
+        continue;
+      }
+      if (row.dimension === "_meta_category_layer") {
+        if (row.notes) hydratedLayer = row.notes;
+        continue;
+      }
+      if (row.dimension.endsWith("_note")) {
+        const domainKey = row.dimension.replace(/_note$/, "");
+        if (row.notes) mineNotes[domainKey] = row.notes;
+        continue;
+      }
+      if (row.score < 0) {
+        mineNA[row.dimension] = true;
+      } else {
+        mineNumeric[row.dimension] = row.score;
+      }
+    }
+    setAiScores(prev => ({ ...mineNumeric, ...prev }));
+    setAiNA(prev => ({ ...mineNA, ...prev }));
+    setAiNotes(prev => ({ ...mineNotes, ...prev }));
+    setAiHalfLife(prev => (prev === null ? hydratedHalfLife : prev));
+    setAiCategoryLayer(prev => (prev === null ? hydratedLayer : prev));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiRows, evaluatorId]);
+
   // Mutation to save score (IIC; legacy insert-only path, no evaluatorId)
   const saveScoreMutation = useMutation({
     mutationFn: async (scoreData: any) => {
@@ -250,6 +429,21 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/companies", companyId, "scores"] });
       toast({ title: "Score saved", description: "Evaluation updated successfully." });
+    },
+  });
+
+  // AI-Native mutations — upsert path (evaluatorId always set), mirrors founder.
+  const saveAiNativeScoreMutation = useMutation({
+    mutationFn: async (payload: { dimension: string; score: number; notes?: string }) => {
+      const res = await apiRequest("POST", `/api/companies/${companyId}/scores`, {
+        lensType: "ai_native",
+        evaluatorId,
+        ...payload,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies", companyId, "scores", "ai_native"] });
     },
   });
 
@@ -308,6 +502,53 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
     const s = existingScores.find(sc => sc.dimension === c.key)?.score || scores[c.key] || 5;
     return sum + s;
   }, 0) + (existingScores.find(s => s.dimension === "ai_moat")?.score || 0) + (existingScores.find(s => s.dimension === "category_creation")?.score || 0);
+
+  // AI-Native composite: same Option C shape as Founder — domains with 0 scored
+  // criteria are excluded, remaining domain weights are renormalized, per-domain
+  // avg (0..5) is scaled to 0..100. Half-Life and Category-Layer do NOT enter the
+  // composite; they are advisory/warning inputs.
+  const aiNativeComposite = useMemo(() => {
+    let weightedSum = 0;
+    let activeWeight = 0;
+    for (const domain of AI_NATIVE_DOMAINS) {
+      let total = 0;
+      let count = 0;
+      for (const c of domain.criteria) {
+        if (aiNA[c.key]) continue;
+        const v = aiScores[c.key];
+        if (typeof v !== "number") continue;
+        total += v;
+        count += 1;
+      }
+      if (count === 0) continue;
+      const domainAvg = total / count;
+      weightedSum += domainAvg * domain.weight;
+      activeWeight += domain.weight;
+    }
+    if (activeWeight === 0) return null;
+    const renormalized = weightedSum / activeWeight;   // 0..5
+    return Math.round((renormalized / 5) * 100);       // 0..100
+  }, [aiScores, aiNA]);
+
+  // Compression warning — doctrine hard flag:
+  //   half-life < 24 months AND (proprietary_data < 6 AND integration_governance < 6)
+  //   → prohibit investment absent a demonstrated control point.
+  const aiCompressionWarning = useMemo(() => {
+    if (aiHalfLife === null || aiHalfLife >= 24) return null;
+    const dataScore = aiNA["proprietary_data"] ? null : aiScores["proprietary_data"];
+    const intScore = aiNA["integration_governance"] ? null : aiScores["integration_governance"];
+    const dataWeak = typeof dataScore !== "number" || dataScore < 3;    // < 6 on 0-10 = < 3 on 0-5
+    const intWeak = typeof intScore !== "number" || intScore < 3;
+    if (dataWeak && intWeak) {
+      return `AI half-life is ${aiHalfLife} months (< 24) and neither Proprietary Data nor Integration/Governance shows a demonstrated control point. Per compression doctrine, prohibit investment.`;
+    }
+    return null;
+  }, [aiHalfLife, aiScores, aiNA]);
+
+  const aiCategoryLayerDef = useMemo(
+    () => AI_CATEGORY_LAYERS.find(l => l.key === aiCategoryLayer) || null,
+    [aiCategoryLayer]
+  );
 
   // Founder composite: Option C math — only scored, non-N/A criteria contribute.
   // For each domain, compute the per-criteria average (0..5) across SCORED ones,
@@ -1205,6 +1446,220 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
           </Card>
         </TabsContent>
 
+        {/* ------------------------------------------------------------------ */}
+        {/* AI-Native Lens — the Compression Doctrine test.                     */}
+        {/* ------------------------------------------------------------------ */}
+        <TabsContent value="ai-native" className="space-y-6 mt-6">
+          {/* Header: composite + doctrine summary */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-lg">AI-Native Compression Test</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Investable = rapid demand capture × control-point formation × exit plausibility. Your scores only — other judges see their own.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-bold text-primary">
+                    {aiNativeComposite === null ? "—" : `${aiNativeComposite}%`}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Composite (scored only)</div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* AI Feature Half-Life numeric input */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                    AI Feature Half-Life (months)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={120}
+                      step={1}
+                      value={aiHalfLife ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value === "" ? null : Number(e.target.value);
+                        setAiHalfLife(v);
+                      }}
+                      onBlur={(e) => {
+                        const v = e.target.value === "" ? -1 : Number(e.target.value);
+                        saveAiNativeScoreMutation.mutate({ dimension: "_meta_half_life", score: v });
+                      }}
+                      placeholder="e.g. 18"
+                      className="w-32 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <span className="text-xs text-muted-foreground">months until ~80% of visible functionality can be reproduced by general agents/incumbents</span>
+                  </div>
+                  {aiHalfLife !== null && aiHalfLife < 24 && (
+                    <div className="text-xs text-amber-800 mt-1">
+                      Under 24 months triggers the doctrine's compression flag if control-point evidence is weak.
+                    </div>
+                  )}
+                </div>
+
+                {/* Category-Layer Fit picker */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                    Category-Layer Fit (doctrine)
+                  </label>
+                  <select
+                    value={aiCategoryLayer ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value || null;
+                      setAiCategoryLayer(v);
+                      saveAiNativeScoreMutation.mutate({
+                        dimension: "_meta_category_layer",
+                        score: 0,
+                        notes: v ?? "",
+                      });
+                    }}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">Select a layer…</option>
+                    {AI_CATEGORY_LAYERS.map(l => (
+                      <option key={l.key} value={l.key}>{l.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Compression warning banner */}
+              {aiCompressionWarning && (
+                <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <Badge className="bg-red-600 text-white shrink-0 mt-0.5">Compression Flag</Badge>
+                    <p className="text-sm text-red-900">{aiCompressionWarning}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Doctrine callout for selected category layer */}
+              {aiCategoryLayerDef && (
+                <div className={`rounded-md border px-4 py-3 ${AI_STANCE_STYLES[aiCategoryLayerDef.stance].card}`}>
+                  <div className="flex items-start gap-2">
+                    <Badge className={`shrink-0 mt-0.5 ${AI_STANCE_STYLES[aiCategoryLayerDef.stance].badge}`}>
+                      {AI_STANCE_STYLES[aiCategoryLayerDef.stance].label}
+                    </Badge>
+                    <div className="text-sm">
+                      <div className="font-medium">{aiCategoryLayerDef.label}</div>
+                      <div className="text-muted-foreground mt-0.5">{aiCategoryLayerDef.guidance}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground italic">
+                Half-Life and Category-Layer are advisory inputs — they do not affect the composite. Default weights: Control-Point 50% / Time & Compression 20% / Anti-Slop 30%.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Per-domain scoring cards */}
+          {AI_NATIVE_DOMAINS.map(domain => (
+            <Card key={domain.key}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">{domain.label}</CardTitle>
+                  <Badge variant="outline" className="text-xs">
+                    Weight: {Math.round(domain.weight * 100)}%
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {domain.criteria.map(c => {
+                  const isNA = !!aiNA[c.key];
+                  const value = aiScores[c.key];
+                  return (
+                    <div key={c.key} className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium">{c.label}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{c.desc}</div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-sm font-mono w-8 text-right">
+                            {isNA ? "N/A" : typeof value === "number" ? value.toFixed(1) : "—"}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={isNA ? "default" : "outline"}
+                            onClick={() => {
+                              const next = !isNA;
+                              setAiNA(prev => ({ ...prev, [c.key]: next }));
+                              if (next) {
+                                setAiScores(prev => {
+                                  const copy = { ...prev };
+                                  delete copy[c.key];
+                                  return copy;
+                                });
+                                saveAiNativeScoreMutation.mutate({ dimension: c.key, score: -1 });
+                              } else {
+                                saveAiNativeScoreMutation.mutate({ dimension: c.key, score: 0 });
+                                setAiScores(prev => ({ ...prev, [c.key]: 0 }));
+                              }
+                            }}
+                          >
+                            N/A
+                          </Button>
+                        </div>
+                      </div>
+                      <Slider
+                        min={0}
+                        max={5}
+                        step={0.5}
+                        disabled={isNA}
+                        value={[typeof value === "number" ? value : 0]}
+                        onValueChange={(v) => {
+                          setAiScores(prev => ({ ...prev, [c.key]: v[0] }));
+                        }}
+                        onValueCommit={(v) => {
+                          saveAiNativeScoreMutation.mutate({ dimension: c.key, score: v[0] });
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+                <div className="pt-2">
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Notes for this section</label>
+                  <Textarea
+                    placeholder={`Observations on ${domain.label.split(":")[1]?.trim() || "this section"}…`}
+                    value={aiNotes[domain.key] || ""}
+                    onChange={(e) => setAiNotes(prev => ({ ...prev, [domain.key]: e.target.value }))}
+                    onBlur={(e) => {
+                      saveAiNativeScoreMutation.mutate({
+                        dimension: `${domain.key}_note`,
+                        score: 0,
+                        notes: e.target.value,
+                      });
+                    }}
+                    rows={3}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </TabsContent>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Valuation Lens — placeholder while benchmarks are finalized.        */}
+        {/* ------------------------------------------------------------------ */}
+        <TabsContent value="valuation" className="space-y-6 mt-6">
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground space-y-2">
+              <div className="text-base font-medium">Valuation lens — benchmarks in progress</div>
+              <div className="text-sm">
+                Coming next: cross-category valuation frame (AI-First, Legacy SaaS + AI, HITL, Data Provider, Pure Services) anchored to Q1–Q2 2026 primary indices and named transactions.
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="founder" className="space-y-6 mt-6">
           {/* Header: composite + judge identity */}
           <Card>
@@ -1362,21 +1817,6 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
           ))}
         </TabsContent>
 
-        <TabsContent value="thesis">
-          <Card>
-            <CardContent className="py-12 text-center text-muted-foreground">
-              Thesis Alignment lens coming in Phase 2. (Stacked bar + weight sliders)
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="grid">
-          <Card>
-            <CardContent className="py-12 text-center text-muted-foreground">
-              Competitive Grid lens coming in Phase 3. (Configurable 2×2 scatter)
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
     </div>
   );
