@@ -1,7 +1,12 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, db, sqlite } from "./storage";
-import { companies, contacts, insertCompanySchema, insertContactSchema, insertIntelligenceEventSchema } from "@shared/schema";
+import {
+  companies, contacts,
+  insertCompanySchema, insertContactSchema, insertIntelligenceEventSchema,
+  insertGateSchema, insertDimensionFloorSchema, insertFindingSchema,
+  GATE_IDS, GATE_STATUSES, FINDING_STATUSES, FINDING_SEVERITIES,
+} from "@shared/schema";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { log } from "./index";
@@ -679,6 +684,192 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       const result = sqlite.prepare("DELETE FROM evaluation_scores WHERE id = ?").run(id);
       res.json({ deleted: result.changes });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ============================================================
+  // Phase 2: Decision Layer routes
+  // Gates, Dimension Floors, Findings Ledger, and the read-only
+  // decision summary that gates INVEST verdicts.
+  // ============================================================
+
+  // --- Company Decision Summary (used by CompanyDetail header) ---
+  app.get("/api/companies/:id/decision-summary", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const summary = await storage.getCompanyDecisionSummary(id);
+      res.json(summary);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // --- Gates ---
+  app.get("/api/companies/:id/gates", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const gates = await storage.getGates(id);
+      res.json(gates);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/companies/:id/gates/:gateId", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.id);
+      const gateId = req.params.gateId;
+      if (!(GATE_IDS as readonly string[]).includes(gateId)) {
+        return res.status(400).json({ message: `Invalid gateId. Must be one of: ${GATE_IDS.join(", ")}` });
+      }
+      const { status, triggerEvent, evaluator, reEvaluationTriggers, notes } = req.body || {};
+      if (status && !(GATE_STATUSES as readonly string[]).includes(status)) {
+        return res.status(400).json({ message: `Invalid status. Must be one of: ${GATE_STATUSES.join(", ")}` });
+      }
+      const payload = insertGateSchema.parse({
+        companyId,
+        gateId,
+        status: status || "open",
+        triggerEvent: triggerEvent ?? null,
+        evaluator: evaluator ?? null,
+        reEvaluationTriggers: reEvaluationTriggers
+          ? (typeof reEvaluationTriggers === "string" ? reEvaluationTriggers : JSON.stringify(reEvaluationTriggers))
+          : null,
+        notes: notes ?? null,
+      });
+      const saved = await storage.upsertGate(payload);
+      res.json(saved);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // --- Dimension Floors ---
+  app.get("/api/companies/:id/floors", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const lensType = typeof req.query.lens === "string" ? req.query.lens : undefined;
+      const rows = await storage.getDimensionFloors(id, lensType);
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/companies/:id/floors", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.id);
+      const { lensType, dimension, cappedAt, reason, evidenceRef, createdBy } = req.body || {};
+      if (!lensType || !dimension || typeof cappedAt !== "number" || !reason) {
+        return res.status(400).json({ message: "lensType, dimension, cappedAt, and reason are required" });
+      }
+      const payload = insertDimensionFloorSchema.parse({
+        companyId, lensType, dimension, cappedAt, reason,
+        evidenceRef: evidenceRef ?? null,
+        createdBy: createdBy ?? null,
+      });
+      const saved = await storage.upsertDimensionFloor(payload);
+      res.json(saved);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/floors/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteDimensionFloor(id);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // --- Findings Ledger (per company) ---
+  app.get("/api/companies/:id/findings", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const findings = await storage.getFindings(id);
+      res.json(findings);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/companies/:id/findings", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.id);
+      const { findingText, sourceDoc, status, severity, owner, deadline, resolutionNote, raisedBy } = req.body || {};
+      if (!findingText || typeof findingText !== "string") {
+        return res.status(400).json({ message: "findingText is required" });
+      }
+      if (status && !(FINDING_STATUSES as readonly string[]).includes(status)) {
+        return res.status(400).json({ message: `Invalid status. Must be one of: ${FINDING_STATUSES.join(", ")}` });
+      }
+      if (severity && !(FINDING_SEVERITIES as readonly string[]).includes(severity)) {
+        return res.status(400).json({ message: `Invalid severity. Must be one of: ${FINDING_SEVERITIES.join(", ")}` });
+      }
+      const payload = insertFindingSchema.parse({
+        companyId,
+        findingText,
+        sourceDoc: sourceDoc ?? null,
+        status: status || "unverified-owner-assigned",
+        severity: severity || "medium",
+        owner: owner ?? null,
+        deadline: deadline ?? null,
+        resolutionNote: resolutionNote ?? null,
+        raisedBy: raisedBy ?? null,
+      });
+      const saved = await storage.createFinding(payload);
+      res.json(saved);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/findings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { findingText, sourceDoc, status, severity, owner, deadline, resolutionNote } = req.body || {};
+      if (status && !(FINDING_STATUSES as readonly string[]).includes(status)) {
+        return res.status(400).json({ message: `Invalid status. Must be one of: ${FINDING_STATUSES.join(", ")}` });
+      }
+      if (severity && !(FINDING_SEVERITIES as readonly string[]).includes(severity)) {
+        return res.status(400).json({ message: `Invalid severity. Must be one of: ${FINDING_SEVERITIES.join(", ")}` });
+      }
+      const patch: Record<string, any> = {};
+      if (findingText !== undefined) patch.findingText = findingText;
+      if (sourceDoc !== undefined) patch.sourceDoc = sourceDoc;
+      if (status !== undefined) patch.status = status;
+      if (severity !== undefined) patch.severity = severity;
+      if (owner !== undefined) patch.owner = owner;
+      if (deadline !== undefined) patch.deadline = deadline;
+      if (resolutionNote !== undefined) patch.resolutionNote = resolutionNote;
+      const updated = await storage.updateFinding(id, patch);
+      if (!updated) return res.status(404).json({ message: "Finding not found" });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/findings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteFinding(id);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // --- Global open-findings dashboard feed ---
+  app.get("/api/findings", async (_req, res) => {
+    try {
+      const rows = await storage.getAllOpenFindings();
+      res.json(rows);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
