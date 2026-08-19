@@ -42,9 +42,34 @@ export const companies = sqliteTable("companies", {
   // Phase 1 CRM
   leadSource: text("lead_source"),
   pipelineStatus: text("pipeline_status").default("sourced"),
+  // Phase 2 — Structured financials (feed the Valuation lens).
+  // Numeric so the lens can compute; existing estimatedRevenue/estimatedValuation stay as text/legacy for backward compat.
+  arrUsd: real("arr_usd"),                              // Annual Recurring Revenue in USD
+  ebitdaUsd: real("ebitda_usd"),                        // LTM EBITDA in USD (can be negative)
+  revenueGrowthPct: real("revenue_growth_pct"),         // LTM YoY revenue growth (e.g. 45 = 45%)
+  fcfMarginPct: real("fcf_margin_pct"),                 // Free cash flow margin (e.g. 12 = 12%)
+  fundingStage: text("funding_stage"),                  // 'seed' | 'series_a' | 'series_b' | 'series_c' | 'growth' | 'pe_owned' | 'public'
+  financialsAsOf: text("financials_as_of"),             // ISO date the numbers reflect (judge-entered)
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+// Valid funding stage values (used by both server validation and client dropdowns).
+export const FUNDING_STAGES = [
+  "seed", "series_a", "series_b", "series_c", "growth", "pe_owned", "public", "bootstrapped"
+] as const;
+export type FundingStage = typeof FUNDING_STAGES[number];
+
+export const FUNDING_STAGE_LABELS: Record<FundingStage, string> = {
+  seed: "Seed",
+  series_a: "Series A",
+  series_b: "Series B",
+  series_c: "Series C",
+  growth: "Growth / Late",
+  pe_owned: "PE-owned",
+  public: "Public",
+  bootstrapped: "Bootstrapped",
+};
 
 export const contacts = sqliteTable("contacts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -225,3 +250,116 @@ export const insertDiligenceResponseSchema = createInsertSchema(diligenceRespons
 
 export type DiligenceResponse = typeof diligenceResponses.$inferSelect;
 export type InsertDiligenceResponse = z.infer<typeof insertDiligenceResponseSchema>;
+
+// ============================================================
+// Phase 2: Decision Layer (Gates, Dimension Floors, Findings Ledger)
+// ============================================================
+
+// Per-company gate status. One row per (companyId, gateId).
+// Gates: G0 = integrity/data completeness, G1 = investment fit, G2 = final IC gate.
+export const gates = sqliteTable("gates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  gateId: text("gate_id").notNull(),          // 'G0' | 'G1' | 'G2'
+  status: text("status").notNull().default("open"), // 'open' | 'cleared' | 'failed' | 'expired'
+  triggerEvent: text("trigger_event"),
+  lastEvaluatedAt: text("last_evaluated_at").default(sql`CURRENT_TIMESTAMP`),
+  evaluator: text("evaluator"),
+  reEvaluationTriggers: text("re_evaluation_triggers"), // JSON array as text
+  notes: text("notes"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Explicit per-dimension score caps with reason + evidence.
+// A floor overrides any evaluator score above the cap for scoring/roll-up purposes.
+export const dimensionFloors = sqliteTable("dimension_floors", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  lensType: text("lens_type").notNull(),      // 'iic' | 'thesis' | 'founder' | 'dit' | ...
+  dimension: text("dimension").notNull(),     // dimension key inside that lens
+  cappedAt: real("capped_at").notNull(),      // score value the dimension is capped at
+  reason: text("reason").notNull(),
+  evidenceRef: text("evidence_ref"),          // URL, finding id, doc ref
+  createdBy: text("created_by"),              // evaluatorId
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Findings Ledger (Disposition Ledger).
+// Every adverse/pending fact about a company that must be dispositioned
+// before a verdict can be written. Status transitions are the whole point.
+export const findings = sqliteTable("findings", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  findingText: text("finding_text").notNull(),
+  sourceDoc: text("source_doc"),              // URL, doc name, or internal ref
+  dateRaised: text("date_raised").default(sql`CURRENT_TIMESTAMP`),
+  status: text("status").notNull().default("unverified-owner-assigned"),
+  // status values:
+  //   'unverified-owner-assigned' (default when raised)
+  //   'verified-incorporated'      (accepted; changes underwriting)
+  //   'verified-immaterial'        (accepted; does not change outcome)
+  //   'rebutted'                   (proven false by evidence)
+  //   'rejected'                   (not pursued; must give reason)
+  severity: text("severity").notNull().default("medium"), // 'low' | 'medium' | 'high' | 'critical'
+  owner: text("owner"),                       // person accountable (name or evaluatorId)
+  deadline: text("deadline"),                 // ISO date
+  resolutionNote: text("resolution_note"),
+  raisedBy: text("raised_by"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertGateSchema = createInsertSchema(gates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDimensionFloorSchema = createInsertSchema(dimensionFloors).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertFindingSchema = createInsertSchema(findings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Gate = typeof gates.$inferSelect;
+export type InsertGate = z.infer<typeof insertGateSchema>;
+export type DimensionFloor = typeof dimensionFloors.$inferSelect;
+export type InsertDimensionFloor = z.infer<typeof insertDimensionFloorSchema>;
+export type Finding = typeof findings.$inferSelect;
+export type InsertFinding = z.infer<typeof insertFindingSchema>;
+
+// Constants shared by client + server for validation and UI.
+export const FINDING_STATUSES = [
+  "unverified-owner-assigned",
+  "verified-incorporated",
+  "verified-immaterial",
+  "rebutted",
+  "rejected",
+] as const;
+export type FindingStatus = typeof FINDING_STATUSES[number];
+
+export const FINDING_SEVERITIES = ["low", "medium", "high", "critical"] as const;
+export type FindingSeverity = typeof FINDING_SEVERITIES[number];
+
+export const GATE_IDS = ["G0", "G1", "G2"] as const;
+export type GateId = typeof GATE_IDS[number];
+
+export const GATE_STATUSES = ["open", "cleared", "failed", "expired"] as const;
+export type GateStatus = typeof GATE_STATUSES[number];
+
+// A finding is "open" (i.e. still blocking a verdict) unless its status is one of these.
+export const FINDING_TERMINAL_STATUSES: FindingStatus[] = [
+  "verified-incorporated",
+  "verified-immaterial",
+  "rebutted",
+  "rejected",
+];
+

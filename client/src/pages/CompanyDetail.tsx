@@ -17,6 +17,10 @@ import type { Company, Contact, IntelligenceEvent } from "@shared/schema";
 import { LensSelector } from "@/components/LensSelector";
 import { CompanyInteractions } from "@/components/CompanyInteractions";
 import { DiligenceForm } from "@/components/DiligenceForm";
+import { FindingsLedger } from "@/components/FindingsLedger";
+import { GatesPanel } from "@/components/GatesPanel";
+import { VerdictBanner } from "@/components/VerdictBanner";
+import { StructuredFinancials } from "@/components/StructuredFinancials";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -128,11 +132,12 @@ export default function CompanyDetail() {
       </div>
 
       <div className="max-w-6xl mx-auto px-8 py-6">
+        <VerdictBanner companyId={company.id} />
         <div className="flex gap-6">
           {/* Main Content */}
           <div className="flex-1 min-w-0">
             <Tabs defaultValue="overview" className="w-full">
-              <TabsList className="w-full justify-start bg-muted/50 mb-4" data-testid="company-tabs">
+              <TabsList className="w-full justify-start bg-muted/50 mb-4 flex-wrap h-auto" data-testid="company-tabs">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="taxonomy">Taxonomy</TabsTrigger>
                 <TabsTrigger value="financials">Financials</TabsTrigger>
@@ -141,6 +146,7 @@ export default function CompanyDetail() {
                 <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
                 <TabsTrigger value="interactions">Interactions &amp; Files</TabsTrigger>
                 <TabsTrigger value="diligence" data-testid="tab-diligence">Diligence</TabsTrigger>
+                <TabsTrigger value="decision" data-testid="tab-decision">Decision Layer</TabsTrigger>
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
 
@@ -182,15 +188,16 @@ export default function CompanyDetail() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="financials">
+              <TabsContent value="financials" className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <FinCard icon={<DollarSign size={16} />} label="Est. Revenue" value={company.estimatedRevenue ? `$${company.estimatedRevenue.toLocaleString()}` : "—"} />
-                  <FinCard icon={<DollarSign size={16} />} label="Est. Valuation" value={company.estimatedValuation ? `$${company.estimatedValuation.toLocaleString()}` : "—"} />
+                  <FinCard icon={<DollarSign size={16} />} label="Est. Revenue (legacy)" value={company.estimatedRevenue ? `$${company.estimatedRevenue.toLocaleString()}` : "—"} />
+                  <FinCard icon={<DollarSign size={16} />} label="Est. Valuation (legacy)" value={company.estimatedValuation ? `$${company.estimatedValuation.toLocaleString()}` : "—"} />
                   <FinCard icon={<DollarSign size={16} />} label="Capital Raised" value={company.capitalRaised ? `$${Number(company.capitalRaised).toLocaleString()}` : "—"} />
                   <FinCard icon={<Building2 size={16} />} label="M&A Status" value={company.maStatus || "—"} />
                   <FinCard icon={<Users size={16} />} label="Employees" value={company.employeeCount ? String(company.employeeCount) : "—"} />
                   <FinCard icon={<Calendar size={16} />} label="Year Founded" value={company.yearFounded ? String(company.yearFounded) : "—"} />
                 </div>
+                <StructuredFinancials company={company} />
               </TabsContent>
 
               <TabsContent value="contacts">
@@ -211,6 +218,13 @@ export default function CompanyDetail() {
 
               <TabsContent value="diligence">
                 <DiligenceForm companyId={company.id} />
+              </TabsContent>
+
+              <TabsContent value="decision">
+                <div className="space-y-6">
+                  <GatesPanel companyId={company.id} />
+                  <FindingsLedger companyId={company.id} />
+                </div>
               </TabsContent>
 
               <TabsContent value="notes">

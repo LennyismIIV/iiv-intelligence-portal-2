@@ -10,6 +10,10 @@ import {
   type CompanyInteraction, type InsertCompanyInteraction, companyInteractions,
   type CompanyFile, type InsertCompanyFile, companyFiles,
   type DiligenceResponse, type InsertDiligenceResponse, diligenceResponses,
+  type Gate, type InsertGate, gates,
+  type DimensionFloor, type InsertDimensionFloor, dimensionFloors,
+  type Finding, type InsertFinding, findings,
+  FINDING_TERMINAL_STATUSES,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -94,6 +98,58 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS diligence_responses_company_version_idx
     ON diligence_responses(company_id, version DESC);
+
+  -- Phase 2: Decision Layer
+  CREATE TABLE IF NOT EXISTS gates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    gate_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    trigger_event TEXT,
+    last_evaluated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    evaluator TEXT,
+    re_evaluation_triggers TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS gates_company_gate_idx
+    ON gates(company_id, gate_id);
+
+  CREATE TABLE IF NOT EXISTS dimension_floors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    lens_type TEXT NOT NULL,
+    dimension TEXT NOT NULL,
+    capped_at REAL NOT NULL,
+    reason TEXT NOT NULL,
+    evidence_ref TEXT,
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS dimension_floors_company_lens_dim_idx
+    ON dimension_floors(company_id, lens_type, dimension);
+
+  CREATE TABLE IF NOT EXISTS findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    finding_text TEXT NOT NULL,
+    source_doc TEXT,
+    date_raised TEXT DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'unverified-owner-assigned',
+    severity TEXT NOT NULL DEFAULT 'medium',
+    owner TEXT,
+    deadline TEXT,
+    resolution_note TEXT,
+    raised_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS findings_company_status_idx
+    ON findings(company_id, status);
+  CREATE INDEX IF NOT EXISTS findings_status_severity_idx
+    ON findings(status, severity);
 `);
 
 // Add Phase 1 CRM columns to existing companies table (idempotent).
@@ -103,8 +159,15 @@ try {
   const has = (n: string) => cols.some(c => c.name === n);
   if (!has("lead_source")) sqlite.exec("ALTER TABLE companies ADD COLUMN lead_source TEXT");
   if (!has("pipeline_status")) sqlite.exec("ALTER TABLE companies ADD COLUMN pipeline_status TEXT DEFAULT 'sourced'");
+  // Phase 2 — structured financials for the Valuation lens.
+  if (!has("arr_usd")) sqlite.exec("ALTER TABLE companies ADD COLUMN arr_usd REAL");
+  if (!has("ebitda_usd")) sqlite.exec("ALTER TABLE companies ADD COLUMN ebitda_usd REAL");
+  if (!has("revenue_growth_pct")) sqlite.exec("ALTER TABLE companies ADD COLUMN revenue_growth_pct REAL");
+  if (!has("fcf_margin_pct")) sqlite.exec("ALTER TABLE companies ADD COLUMN fcf_margin_pct REAL");
+  if (!has("funding_stage")) sqlite.exec("ALTER TABLE companies ADD COLUMN funding_stage TEXT");
+  if (!has("financials_as_of")) sqlite.exec("ALTER TABLE companies ADD COLUMN financials_as_of TEXT");
 } catch (e) {
-  console.error("[storage] Failed to add CRM columns:", e);
+  console.error("[storage] Failed to add CRM/financial columns:", e);
 }
 
 // One-time data migration: legacy pipelineStatus values from Phase 1 ("diligence")
@@ -184,6 +247,27 @@ export interface IStorage {
   getLatestDiligenceResponse(companyId: number): Promise<DiligenceResponse | undefined>;
   createDiligenceResponse(payload: InsertDiligenceResponse): Promise<DiligenceResponse>;
   getDistinctLeadSources(): Promise<string[]>;
+
+  // Phase 2 Decision Layer
+  getGates(companyId: number): Promise<Gate[]>;
+  upsertGate(gate: InsertGate): Promise<Gate>;
+  getDimensionFloors(companyId: number, lensType?: string): Promise<DimensionFloor[]>;
+  upsertDimensionFloor(floor: InsertDimensionFloor): Promise<DimensionFloor>;
+  deleteDimensionFloor(id: number): Promise<void>;
+  getFindings(companyId: number): Promise<Finding[]>;
+  getAllOpenFindings(): Promise<Array<Finding & { companyName: string }>>;
+  createFinding(finding: InsertFinding): Promise<Finding>;
+  updateFinding(id: number, data: Partial<InsertFinding>): Promise<Finding | undefined>;
+  deleteFinding(id: number): Promise<void>;
+  getCompanyDecisionSummary(companyId: number): Promise<{
+    gates: Gate[];
+    openFindingsBySeverity: Record<string, number>;
+    openFindingsCount: number;
+    criticalOrHighBlockers: number;
+    dimensionFloors: DimensionFloor[];
+    canWriteInvestVerdict: boolean;
+    blockingReasons: string[];
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -644,6 +728,158 @@ export class DatabaseStorage implements IStorage {
 
   async createDiligenceResponse(payload: InsertDiligenceResponse): Promise<DiligenceResponse> {
     return db.insert(diligenceResponses).values(payload).returning().get();
+  }
+
+  // ===== Phase 2 Decision Layer =====
+  async getGates(companyId: number): Promise<Gate[]> {
+    return db.select().from(gates)
+      .where(eq(gates.companyId, companyId))
+      .orderBy(asc(gates.gateId))
+      .all();
+  }
+
+  async upsertGate(gate: InsertGate): Promise<Gate> {
+    const existing = db.select().from(gates)
+      .where(and(eq(gates.companyId, gate.companyId), eq(gates.gateId, gate.gateId))!)
+      .get();
+    if (existing) {
+      return db.update(gates)
+        .set({
+          status: gate.status,
+          triggerEvent: gate.triggerEvent ?? null,
+          evaluator: gate.evaluator ?? null,
+          reEvaluationTriggers: gate.reEvaluationTriggers ?? null,
+          notes: gate.notes ?? null,
+          lastEvaluatedAt: sql`CURRENT_TIMESTAMP`,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(eq(gates.id, existing.id))
+        .returning().get();
+    }
+    return db.insert(gates).values(gate).returning().get();
+  }
+
+  async getDimensionFloors(companyId: number, lensType?: string): Promise<DimensionFloor[]> {
+    let query = db.select().from(dimensionFloors)
+      .where(eq(dimensionFloors.companyId, companyId));
+    const rows = query.all();
+    if (lensType) return rows.filter(r => r.lensType === lensType);
+    return rows;
+  }
+
+  async upsertDimensionFloor(floor: InsertDimensionFloor): Promise<DimensionFloor> {
+    const existing = db.select().from(dimensionFloors)
+      .where(and(
+        eq(dimensionFloors.companyId, floor.companyId),
+        eq(dimensionFloors.lensType, floor.lensType),
+        eq(dimensionFloors.dimension, floor.dimension),
+      )!)
+      .get();
+    if (existing) {
+      return db.update(dimensionFloors)
+        .set({
+          cappedAt: floor.cappedAt,
+          reason: floor.reason,
+          evidenceRef: floor.evidenceRef ?? null,
+          createdBy: floor.createdBy ?? existing.createdBy ?? null,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(eq(dimensionFloors.id, existing.id))
+        .returning().get();
+    }
+    return db.insert(dimensionFloors).values(floor).returning().get();
+  }
+
+  async deleteDimensionFloor(id: number): Promise<void> {
+    db.delete(dimensionFloors).where(eq(dimensionFloors.id, id)).run();
+  }
+
+  async getFindings(companyId: number): Promise<Finding[]> {
+    return db.select().from(findings)
+      .where(eq(findings.companyId, companyId))
+      .orderBy(desc(findings.createdAt))
+      .all();
+  }
+
+  async getAllOpenFindings(): Promise<Array<Finding & { companyName: string }>> {
+    // "Open" = status not in FINDING_TERMINAL_STATUSES
+    const allOpen = db.select().from(findings)
+      .where(sql`${findings.status} NOT IN ('verified-incorporated','verified-immaterial','rebutted','rejected')`)
+      .orderBy(desc(findings.severity), desc(findings.createdAt))
+      .all();
+    const companyIds = Array.from(new Set(allOpen.map(f => f.companyId)));
+    if (companyIds.length === 0) return [];
+    const companyRows = db.select().from(companies)
+      .where(inArray(companies.id, companyIds))
+      .all();
+    const nameById = new Map(companyRows.map(c => [c.id, c.name]));
+    return allOpen.map(f => ({
+      ...f,
+      companyName: nameById.get(f.companyId) || "Unknown",
+    }));
+  }
+
+  async createFinding(finding: InsertFinding): Promise<Finding> {
+    return db.insert(findings).values(finding).returning().get();
+  }
+
+  async updateFinding(id: number, data: Partial<InsertFinding>): Promise<Finding | undefined> {
+    return db.update(findings)
+      .set({ ...data, updatedAt: sql`CURRENT_TIMESTAMP` })
+      .where(eq(findings.id, id))
+      .returning().get();
+  }
+
+  async deleteFinding(id: number): Promise<void> {
+    db.delete(findings).where(eq(findings.id, id)).run();
+  }
+
+  // The core decision-layer read: everything a caller needs to decide
+  // whether an INVEST verdict is allowed for this company.
+  async getCompanyDecisionSummary(companyId: number) {
+    const [companyGates, companyFindings, companyFloors] = await Promise.all([
+      this.getGates(companyId),
+      this.getFindings(companyId),
+      this.getDimensionFloors(companyId),
+    ]);
+
+    const terminal = new Set<string>(FINDING_TERMINAL_STATUSES as unknown as string[]);
+    const openFindings = companyFindings.filter(f => !terminal.has(f.status));
+    const openFindingsBySeverity: Record<string, number> = {
+      low: 0, medium: 0, high: 0, critical: 0,
+    };
+    for (const f of openFindings) {
+      openFindingsBySeverity[f.severity] = (openFindingsBySeverity[f.severity] ?? 0) + 1;
+    }
+    const criticalOrHighBlockers = openFindingsBySeverity.critical + openFindingsBySeverity.high;
+
+    const failedGates = companyGates.filter(g => g.status === "failed");
+    const openGates = companyGates.filter(g => g.status === "open");
+
+    const blockingReasons: string[] = [];
+    if (criticalOrHighBlockers > 0) {
+      blockingReasons.push(
+        `${criticalOrHighBlockers} open finding${criticalOrHighBlockers === 1 ? "" : "s"} of high or critical severity`,
+      );
+    }
+    if (failedGates.length > 0) {
+      blockingReasons.push(`${failedGates.length} failed gate(s): ${failedGates.map(g => g.gateId).join(", ")}`);
+    }
+    if (openGates.some(g => g.gateId === "G2")) {
+      blockingReasons.push("G2 (final IC gate) is still open");
+    }
+
+    const canWriteInvestVerdict = blockingReasons.length === 0;
+
+    return {
+      gates: companyGates,
+      openFindingsBySeverity,
+      openFindingsCount: openFindings.length,
+      criticalOrHighBlockers,
+      dimensionFloors: companyFloors,
+      canWriteInvestVerdict,
+      blockingReasons,
+    };
   }
 
   // Distinct non-empty lead_source values across all companies, for autocomplete.
