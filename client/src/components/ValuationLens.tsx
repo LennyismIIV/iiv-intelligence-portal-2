@@ -17,6 +17,12 @@ import { VALUATION_BANDS, CATEGORIES, DI_FRAMEWORK_BANDS, VALUATION_BANDS_META, 
 import { recommendBand, ruleOf40, computeEstimate, fmtUsd, type ValuationInputs } from "@/lib/valuationLogic";
 import { AlertTriangle, ExternalLink, Save, Pencil, Info, TrendingUp, Building2 } from "lucide-react";
 
+// Sentinel value written to `evaluationScores.score` when an override input is left blank.
+// The scores API is upsert-only (no delete), so we cannot remove a row — we write a value
+// that is guaranteed to never be a real override, and treat it as "no override" on hydrate.
+// -999999 was chosen because ARR/EBITDA/growth/FCF/multiples will never legitimately hit it.
+const BLANK_SENTINEL = -999999;
+
 /**
  * Valuation Lens \u2014 positioning-and-triangulation tool.
  *
@@ -111,15 +117,21 @@ export function ValuationLens({ companyId, company, evaluatorId }: ValuationLens
         case "_meta_flag_ai_loadbearing": setAiIsLoadBearing(row.score >= 1); break;
         case "_meta_flag_frontier_adj": setIsFrontierAdjacent(row.score >= 1); break;
         case "_meta_flag_public_path": setIsPublicPath(row.score >= 1); break;
-        case "_meta_mult_lo_override": setMultLoOverride(String(row.score)); break;
-        case "_meta_mult_hi_override": setMultHiOverride(String(row.score)); break;
+        // Sentinel value -999999 means "no override; use pulled value".
+        case "_meta_mult_lo_override": if (row.score !== BLANK_SENTINEL && row.score !== 0) setMultLoOverride(String(row.score)); break;
+        case "_meta_mult_hi_override": if (row.score !== BLANK_SENTINEL && row.score !== 0) setMultHiOverride(String(row.score)); break;
         case "_meta_mult_override_reason": if (row.notes) setMultOverrideReason(row.notes); break;
         case "_meta_conviction": setConviction(row.score); break;
         case "_meta_narrative": if (row.notes) setNarrative(row.notes); break;
-        case "_meta_arr_override": if (row.score > 0) setArrOverride(String(row.score)); break;
-        case "_meta_ebitda_override": setEbitdaOverride(String(row.score)); break;
-        case "_meta_growth_override": setGrowthOverride(String(row.score)); break;
-        case "_meta_fcf_override": setFcfOverride(String(row.score)); break;
+        // Sentinel value -999999 means "no override; use pulled value".
+        // We also treat 0 as "no override" here to (a) heal any corrupted pre-sentinel rows
+        // where a blank input was persisted as 0, and (b) because a 0% growth / 0% FCF /
+        // $0 EBITDA "override" is functionally identical to pulling the value from the record
+        // — the recommender treats undefined and 0 the same way for these three fields.
+        case "_meta_arr_override": if (row.score !== BLANK_SENTINEL && row.score > 0) setArrOverride(String(row.score)); break;
+        case "_meta_ebitda_override": if (row.score !== BLANK_SENTINEL && row.score !== 0) setEbitdaOverride(String(row.score)); break;
+        case "_meta_growth_override": if (row.score !== BLANK_SENTINEL && row.score !== 0) setGrowthOverride(String(row.score)); break;
+        case "_meta_fcf_override": if (row.score !== BLANK_SENTINEL && row.score !== 0) setFcfOverride(String(row.score)); break;
         case "_meta_stage_override": if (row.notes) setStageOverride(row.notes); break;
       }
     }
@@ -218,15 +230,17 @@ export function ValuationLens({ companyId, company, evaluatorId }: ValuationLens
         save.mutateAsync({ dimension: "_meta_flag_ai_loadbearing", score: aiIsLoadBearing ? 1 : 0 }),
         save.mutateAsync({ dimension: "_meta_flag_frontier_adj", score: isFrontierAdjacent ? 1 : 0 }),
         save.mutateAsync({ dimension: "_meta_flag_public_path", score: isPublicPath ? 1 : 0 }),
-        save.mutateAsync({ dimension: "_meta_mult_lo_override", score: usingMultOverride ? Number(multLoOverride) : 0 }),
-        save.mutateAsync({ dimension: "_meta_mult_hi_override", score: usingMultOverride ? Number(multHiOverride) : 0 }),
+        save.mutateAsync({ dimension: "_meta_mult_lo_override", score: usingMultOverride ? Number(multLoOverride) : BLANK_SENTINEL }),
+        save.mutateAsync({ dimension: "_meta_mult_hi_override", score: usingMultOverride ? Number(multHiOverride) : BLANK_SENTINEL }),
         save.mutateAsync({ dimension: "_meta_mult_override_reason", score: 0, notes: usingMultOverride ? multOverrideReason : "" }),
         save.mutateAsync({ dimension: "_meta_conviction", score: conviction }),
         save.mutateAsync({ dimension: "_meta_narrative", score: 0, notes: narrative }),
-        save.mutateAsync({ dimension: "_meta_arr_override", score: arrOverride !== "" ? Number(arrOverride) : 0 }),
-        save.mutateAsync({ dimension: "_meta_ebitda_override", score: ebitdaOverride !== "" ? Number(ebitdaOverride) : 0 }),
-        save.mutateAsync({ dimension: "_meta_growth_override", score: growthOverride !== "" ? Number(growthOverride) : 0 }),
-        save.mutateAsync({ dimension: "_meta_fcf_override", score: fcfOverride !== "" ? Number(fcfOverride) : 0 }),
+        // Blank field → write BLANK_SENTINEL so hydrate treats it as "no override, use pulled value".
+        // This prevents an empty input from silently persisting as an active 0 override.
+        save.mutateAsync({ dimension: "_meta_arr_override", score: arrOverride !== "" && Number.isFinite(Number(arrOverride)) ? Number(arrOverride) : BLANK_SENTINEL }),
+        save.mutateAsync({ dimension: "_meta_ebitda_override", score: ebitdaOverride !== "" && Number.isFinite(Number(ebitdaOverride)) ? Number(ebitdaOverride) : BLANK_SENTINEL }),
+        save.mutateAsync({ dimension: "_meta_growth_override", score: growthOverride !== "" && Number.isFinite(Number(growthOverride)) ? Number(growthOverride) : BLANK_SENTINEL }),
+        save.mutateAsync({ dimension: "_meta_fcf_override", score: fcfOverride !== "" && Number.isFinite(Number(fcfOverride)) ? Number(fcfOverride) : BLANK_SENTINEL }),
         save.mutateAsync({ dimension: "_meta_stage_override", score: 0, notes: stageOverride }),
       ];
       await Promise.all(jobs);
@@ -337,10 +351,21 @@ export function ValuationLens({ companyId, company, evaluatorId }: ValuationLens
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Category</Label>
-              <Select value={category || "unset"} onValueChange={v => setCategory(v === "unset" ? null : v as CategoryKey)}>
+              <Select value={category || "unset"} onValueChange={v => {
+                const next = v === "unset" ? null : (v as CategoryKey);
+                // Bug fix: switching category invalidates any prior band override —
+                // a band chosen under a different category is meaningless. Reset the override
+                // state so the user is shown the recommendation for the new category and
+                // must consciously override again (with a new reason) if they still want to.
+                if (next !== category) {
+                  setSelectedBand(null);
+                  setOverrideReason("");
+                }
+                setCategory(next);
+              }}>
                 <SelectTrigger><SelectValue placeholder="Pick category" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="unset">\u2014 Pick a category \u2014</SelectItem>
+                  <SelectItem value="unset">— Pick a category —</SelectItem>
                   {(Object.keys(CATEGORIES) as CategoryKey[]).map(k => (
                     <SelectItem key={k} value={k}>{CATEGORIES[k].label}</SelectItem>
                   ))}
