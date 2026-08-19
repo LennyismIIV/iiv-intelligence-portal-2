@@ -13,7 +13,8 @@ import {
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { EvaluationScore } from "@shared/schema";
+import type { EvaluationScore, Company } from "@shared/schema";
+import { ValuationLens } from "@/components/ValuationLens";
 
 interface LensSelectorProps {
   companyId: number;
@@ -303,6 +304,16 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
   const [aiNotes, setAiNotes] = useState<Record<string, string>>({});
   const [aiHalfLife, setAiHalfLife] = useState<number | null>(null);   // months; null = unset
   const [aiCategoryLayer, setAiCategoryLayer] = useState<string | null>(null);
+
+  // Fetch the full company record — used by the Valuation lens for pulled financials.
+  const { data: companyRecord } = useQuery<Company>({
+    queryKey: ["/api/companies", String(companyId)],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/companies/${companyId}`);
+      return res.json();
+    },
+    enabled: !!companyId,
+  });
 
   // Fetch existing scores for IIC lens
   const { data: existingScores = [] } = useQuery<EvaluationScore[]>({
@@ -1647,17 +1658,16 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
         </TabsContent>
 
         {/* ------------------------------------------------------------------ */}
-        {/* Valuation Lens — placeholder while benchmarks are finalized.        */}
+        {/* Valuation Lens — positioning-and-triangulation tool.               */}
         {/* ------------------------------------------------------------------ */}
         <TabsContent value="valuation" className="space-y-6 mt-6">
-          <Card>
-            <CardContent className="py-12 text-center text-muted-foreground space-y-2">
-              <div className="text-base font-medium">Valuation lens — benchmarks in progress</div>
-              <div className="text-sm">
-                Coming next: cross-category valuation frame (AI-First, Legacy SaaS + AI, HITL, Data Provider, Pure Services) anchored to Q1–Q2 2026 primary indices and named transactions.
-              </div>
-            </CardContent>
-          </Card>
+          {companyRecord ? (
+            <ValuationLens companyId={companyId} company={companyRecord} evaluatorId={evaluatorId} />
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">Loading company…</CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="founder" className="space-y-6 mt-6">

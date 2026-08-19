@@ -159,8 +159,15 @@ try {
   const has = (n: string) => cols.some(c => c.name === n);
   if (!has("lead_source")) sqlite.exec("ALTER TABLE companies ADD COLUMN lead_source TEXT");
   if (!has("pipeline_status")) sqlite.exec("ALTER TABLE companies ADD COLUMN pipeline_status TEXT DEFAULT 'sourced'");
+  // Phase 2 — structured financials for the Valuation lens.
+  if (!has("arr_usd")) sqlite.exec("ALTER TABLE companies ADD COLUMN arr_usd REAL");
+  if (!has("ebitda_usd")) sqlite.exec("ALTER TABLE companies ADD COLUMN ebitda_usd REAL");
+  if (!has("revenue_growth_pct")) sqlite.exec("ALTER TABLE companies ADD COLUMN revenue_growth_pct REAL");
+  if (!has("fcf_margin_pct")) sqlite.exec("ALTER TABLE companies ADD COLUMN fcf_margin_pct REAL");
+  if (!has("funding_stage")) sqlite.exec("ALTER TABLE companies ADD COLUMN funding_stage TEXT");
+  if (!has("financials_as_of")) sqlite.exec("ALTER TABLE companies ADD COLUMN financials_as_of TEXT");
 } catch (e) {
-  console.error("[storage] Failed to add CRM columns:", e);
+  console.error("[storage] Failed to add CRM/financial columns:", e);
 }
 
 // One-time data migration: legacy pipelineStatus values from Phase 1 ("diligence")

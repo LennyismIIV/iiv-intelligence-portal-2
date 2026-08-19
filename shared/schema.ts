@@ -42,9 +42,34 @@ export const companies = sqliteTable("companies", {
   // Phase 1 CRM
   leadSource: text("lead_source"),
   pipelineStatus: text("pipeline_status").default("sourced"),
+  // Phase 2 — Structured financials (feed the Valuation lens).
+  // Numeric so the lens can compute; existing estimatedRevenue/estimatedValuation stay as text/legacy for backward compat.
+  arrUsd: real("arr_usd"),                              // Annual Recurring Revenue in USD
+  ebitdaUsd: real("ebitda_usd"),                        // LTM EBITDA in USD (can be negative)
+  revenueGrowthPct: real("revenue_growth_pct"),         // LTM YoY revenue growth (e.g. 45 = 45%)
+  fcfMarginPct: real("fcf_margin_pct"),                 // Free cash flow margin (e.g. 12 = 12%)
+  fundingStage: text("funding_stage"),                  // 'seed' | 'series_a' | 'series_b' | 'series_c' | 'growth' | 'pe_owned' | 'public'
+  financialsAsOf: text("financials_as_of"),             // ISO date the numbers reflect (judge-entered)
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+// Valid funding stage values (used by both server validation and client dropdowns).
+export const FUNDING_STAGES = [
+  "seed", "series_a", "series_b", "series_c", "growth", "pe_owned", "public", "bootstrapped"
+] as const;
+export type FundingStage = typeof FUNDING_STAGES[number];
+
+export const FUNDING_STAGE_LABELS: Record<FundingStage, string> = {
+  seed: "Seed",
+  series_a: "Series A",
+  series_b: "Series B",
+  series_c: "Series C",
+  growth: "Growth / Late",
+  pe_owned: "PE-owned",
+  public: "Public",
+  bootstrapped: "Bootstrapped",
+};
 
 export const contacts = sqliteTable("contacts", {
   id: integer("id").primaryKey({ autoIncrement: true }),

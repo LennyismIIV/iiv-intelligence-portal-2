@@ -20,6 +20,7 @@ import { DiligenceForm } from "@/components/DiligenceForm";
 import { FindingsLedger } from "@/components/FindingsLedger";
 import { GatesPanel } from "@/components/GatesPanel";
 import { VerdictBanner } from "@/components/VerdictBanner";
+import { StructuredFinancials } from "@/components/StructuredFinancials";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -187,15 +188,16 @@ export default function CompanyDetail() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="financials">
+              <TabsContent value="financials" className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <FinCard icon={<DollarSign size={16} />} label="Est. Revenue" value={company.estimatedRevenue ? `$${company.estimatedRevenue.toLocaleString()}` : "—"} />
-                  <FinCard icon={<DollarSign size={16} />} label="Est. Valuation" value={company.estimatedValuation ? `$${company.estimatedValuation.toLocaleString()}` : "—"} />
+                  <FinCard icon={<DollarSign size={16} />} label="Est. Revenue (legacy)" value={company.estimatedRevenue ? `$${company.estimatedRevenue.toLocaleString()}` : "—"} />
+                  <FinCard icon={<DollarSign size={16} />} label="Est. Valuation (legacy)" value={company.estimatedValuation ? `$${company.estimatedValuation.toLocaleString()}` : "—"} />
                   <FinCard icon={<DollarSign size={16} />} label="Capital Raised" value={company.capitalRaised ? `$${Number(company.capitalRaised).toLocaleString()}` : "—"} />
                   <FinCard icon={<Building2 size={16} />} label="M&A Status" value={company.maStatus || "—"} />
                   <FinCard icon={<Users size={16} />} label="Employees" value={company.employeeCount ? String(company.employeeCount) : "—"} />
                   <FinCard icon={<Calendar size={16} />} label="Year Founded" value={company.yearFounded ? String(company.yearFounded) : "—"} />
                 </div>
+                <StructuredFinancials company={company} />
               </TabsContent>
 
               <TabsContent value="contacts">

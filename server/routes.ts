@@ -626,6 +626,39 @@ export async function registerRoutes(
     }
   });
 
+  // Structured financials update — feeds the Valuation lens.
+  // All fields optional; unspecified fields untouched.
+  app.patch("/api/companies/:id/financials", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (Number.isNaN(id)) return res.status(400).json({ message: "Invalid company id" });
+      const { arrUsd, ebitdaUsd, revenueGrowthPct, fcfMarginPct, fundingStage, financialsAsOf } = req.body || {};
+      const updates: any = {};
+      const setNumeric = (key: string, value: unknown) => {
+        if (value === null) { updates[key] = null; return; }
+        if (value === undefined || value === "") return;
+        const n = typeof value === "number" ? value : Number(value);
+        if (Number.isFinite(n)) updates[key] = n;
+      };
+      setNumeric("arrUsd", arrUsd);
+      setNumeric("ebitdaUsd", ebitdaUsd);
+      setNumeric("revenueGrowthPct", revenueGrowthPct);
+      setNumeric("fcfMarginPct", fcfMarginPct);
+      if (fundingStage === null) updates.fundingStage = null;
+      else if (typeof fundingStage === "string" && fundingStage.length > 0) updates.fundingStage = fundingStage;
+      if (financialsAsOf === null) updates.financialsAsOf = null;
+      else if (typeof financialsAsOf === "string" && financialsAsOf.length > 0) updates.financialsAsOf = financialsAsOf;
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "Provide at least one financial field." });
+      }
+      const updated = await storage.updateCompany(id, updates);
+      if (!updated) return res.status(404).json({ message: "Company not found" });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
   // Lightweight pipeline status update on the company itself.
   app.patch("/api/companies/:id/pipeline", async (req, res) => {
     try {
