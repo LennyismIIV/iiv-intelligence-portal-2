@@ -14,6 +14,8 @@ import {
   type DimensionFloor, type InsertDimensionFloor, dimensionFloors,
   type Finding, type InsertFinding, findings,
   FINDING_TERMINAL_STATUSES,
+  encodeScorecardArrays,
+  decodeScorecardArrays,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -166,8 +168,17 @@ try {
   if (!has("fcf_margin_pct")) sqlite.exec("ALTER TABLE companies ADD COLUMN fcf_margin_pct REAL");
   if (!has("funding_stage")) sqlite.exec("ALTER TABLE companies ADD COLUMN funding_stage TEXT");
   if (!has("financials_as_of")) sqlite.exec("ALTER TABLE companies ADD COLUMN financials_as_of TEXT");
+  // P3.1 — Scorecard-minimal Firm fields on existing companies SoR.
+  if (!has("map_a_x")) sqlite.exec("ALTER TABLE companies ADD COLUMN map_a_x REAL");
+  if (!has("map_a_y")) sqlite.exec("ALTER TABLE companies ADD COLUMN map_a_y REAL");
+  if (!has("strategic_posture")) sqlite.exec("ALTER TABLE companies ADD COLUMN strategic_posture TEXT");
+  if (!has("valuation_category")) sqlite.exec("ALTER TABLE companies ADD COLUMN valuation_category TEXT");
+  if (!has("human_data_supply_category")) sqlite.exec("ALTER TABLE companies ADD COLUMN human_data_supply_category TEXT");
+  if (!has("platform_stage")) sqlite.exec("ALTER TABLE companies ADD COLUMN platform_stage TEXT");
+  if (!has("vc_control_layers")) sqlite.exec("ALTER TABLE companies ADD COLUMN vc_control_layers TEXT");
+  if (!has("brand_tags")) sqlite.exec("ALTER TABLE companies ADD COLUMN brand_tags TEXT");
 } catch (e) {
-  console.error("[storage] Failed to add CRM/financial columns:", e);
+  console.error("[storage] Failed to add CRM/financial/scorecard columns:", e);
 }
 
 // One-time data migration: legacy pipelineStatus values from Phase 1 ("diligence")
@@ -183,9 +194,37 @@ try {
   console.error("[storage] pipeline_status migration failed:", e);
 }
 
+// P3.1 — map existing gen2_relationship onto brand_tags.gen2_client when
+// brand_tags is still unset. Idempotent: only fills NULL/empty brand_tags.
+try {
+  const result = sqlite
+    .prepare(`
+      UPDATE companies
+      SET brand_tags = '["gen2_client"]'
+      WHERE (brand_tags IS NULL OR brand_tags = '' OR brand_tags = '[]')
+        AND gen2_relationship IS NOT NULL
+        AND TRIM(gen2_relationship) != ''
+    `)
+    .run();
+  if (result.changes > 0) {
+    console.log(`[storage] Mapped gen2_relationship -> brand_tags.gen2_client on ${result.changes} company row(s)`);
+  }
+} catch (e) {
+  console.error("[storage] brand_tags gen2 mapping failed:", e);
+}
+
 sqlite.pragma("journal_mode = WAL");
 
 export const db = drizzle(sqlite);
+
+function decodeCompany<T extends Record<string, unknown> | undefined>(row: T): T {
+  if (!row) return row;
+  return decodeScorecardArrays(row) as T;
+}
+
+function encodeCompanyWrite<T extends Record<string, unknown>>(data: T): T {
+  return encodeScorecardArrays(data);
+}
 
 export interface IStorage {
   // Companies
@@ -364,19 +403,25 @@ export class DatabaseStorage implements IStorage {
     fullQuery = fullQuery.limit(limit).offset(offset);
 
     const result = fullQuery.all();
-    return { companies: result, total };
+    return { companies: result.map((row) => decodeCompany(row)), total };
   }
 
   async getCompany(id: number): Promise<Company | undefined> {
-    return db.select().from(companies).where(eq(companies.id, id)).get();
+    const row = db.select().from(companies).where(eq(companies.id, id)).get();
+    return decodeCompany(row);
   }
 
   async createCompany(company: InsertCompany): Promise<Company> {
-    return db.insert(companies).values(company).returning().get();
+    const row = db.insert(companies).values(encodeCompanyWrite(company as Record<string, unknown>) as any).returning().get();
+    return decodeCompany(row);
   }
 
   async updateCompany(id: number, data: Partial<InsertCompany>): Promise<Company | undefined> {
-    return db.update(companies).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(companies.id, id)).returning().get();
+    const row = db.update(companies).set({
+      ...encodeCompanyWrite(data as Record<string, unknown>),
+      updatedAt: new Date().toISOString(),
+    } as any).where(eq(companies.id, id)).returning().get();
+    return decodeCompany(row);
   }
 
   async deleteCompany(id: number): Promise<void> {
@@ -512,12 +557,12 @@ export class DatabaseStorage implements IStorage {
         like(companies.buyerPrimary, s),
         like(companies.jtbdPrimary, s),
       )
-    ).limit(50).all();
+    ).limit(50).all().map((row) => decodeCompany(row));
   }
 
   async getCompaniesByIds(ids: number[]): Promise<Company[]> {
     if (ids.length === 0) return [];
-    return db.select().from(companies).where(inArray(companies.id, ids)).all();
+    return db.select().from(companies).where(inArray(companies.id, ids)).all().map((row) => decodeCompany(row));
   }
 
   async getCompanyCount(): Promise<number> {
@@ -525,7 +570,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seedCompany(company: InsertCompany): Promise<Company> {
-    return db.insert(companies).values(company).returning().get();
+    const row = db.insert(companies).values(encodeCompanyWrite(company as Record<string, unknown>) as any).returning().get();
+    return decodeCompany(row);
   }
 
   // Evaluation Lenses (Phase 1+)

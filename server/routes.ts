@@ -6,6 +6,7 @@ import {
   insertCompanySchema, insertContactSchema, insertIntelligenceEventSchema,
   insertGateSchema, insertDimensionFloorSchema, insertFindingSchema,
   GATE_IDS, GATE_STATUSES, FINDING_STATUSES, FINDING_SEVERITIES,
+  applyScorecardValidation,
 } from "@shared/schema";
 import { readFileSync } from "fs";
 import { resolve } from "path";
@@ -96,6 +97,10 @@ async function reseedFromFile(): Promise<{ inserted: number; updated: number; to
 }
 
 async function seedDatabase() {
+  if (process.env.SKIP_SEED === "1" || process.env.SKIP_SEED === "true") {
+    log("SKIP_SEED set; leaving companies table as-is.");
+    return;
+  }
   const companyCount = await storage.getCompanyCount();
   if (companyCount > 0) {
     log(`Database already has ${companyCount} companies, running upsert sync from seed-data.json...`);
@@ -209,7 +214,8 @@ export async function registerRoutes(
   // POST /api/companies
   app.post("/api/companies", async (req, res) => {
     try {
-      const parsed = insertCompanySchema.parse(req.body);
+      const body = applyScorecardValidation(req.body || {});
+      const parsed = insertCompanySchema.parse(body);
       const company = await storage.createCompany(parsed);
       res.status(201).json(company);
     } catch (err: any) {
@@ -218,10 +224,13 @@ export async function registerRoutes(
   });
 
   // PATCH /api/companies/:id
+  // Existing company fields pass through; Scorecard-minimal fields are
+  // enum/range-validated (camelCase or snake_case aliases).
   app.patch("/api/companies/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const company = await storage.updateCompany(id, req.body);
+      const body = applyScorecardValidation(req.body || {});
+      const company = await storage.updateCompany(id, body as any);
       if (!company) return res.status(404).json({ message: "Company not found" });
       res.json(company);
     } catch (err: any) {

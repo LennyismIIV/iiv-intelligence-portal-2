@@ -21,6 +21,7 @@ import { FindingsLedger } from "@/components/FindingsLedger";
 import { GatesPanel } from "@/components/GatesPanel";
 import { VerdictBanner } from "@/components/VerdictBanner";
 import { StructuredFinancials } from "@/components/StructuredFinancials";
+import { ScorecardFieldsPanel } from "@/components/ScorecardFieldsPanel";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -147,6 +148,7 @@ export default function CompanyDetail() {
                 <TabsTrigger value="interactions">Interactions &amp; Files</TabsTrigger>
                 <TabsTrigger value="diligence" data-testid="tab-diligence">Diligence</TabsTrigger>
                 <TabsTrigger value="decision" data-testid="tab-decision">Decision Layer</TabsTrigger>
+                <TabsTrigger value="scorecard" data-testid="tab-scorecard">Scorecard</TabsTrigger>
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
 
@@ -225,6 +227,10 @@ export default function CompanyDetail() {
                   <GatesPanel companyId={company.id} />
                   <FindingsLedger companyId={company.id} />
                 </div>
+              </TabsContent>
+
+              <TabsContent value="scorecard">
+                <ScorecardFieldsPanel company={company} />
               </TabsContent>
 
               <TabsContent value="notes">
