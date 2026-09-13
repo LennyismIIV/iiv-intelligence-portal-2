@@ -449,3 +449,54 @@ export const valuationTapes = sqliteTable("valuation_tapes", {
 
 export type ValuationTapeRow = typeof valuationTapes.$inferSelect;
 
+// ============================================================
+// P3.3 ValuationAssessment (Firm + required approved tape)
+// ============================================================
+export {
+  HARD_RULE_IDS,
+  HARD_RULE_LABELS,
+  DOCTRINE_FLAGS,
+  DOCTRINE_FLAG_LABELS,
+  FINANCIALS_CONFIDENCE,
+  VALUATION_ASSESSMENT_CREATE_SQL,
+  ValuationAssessmentError,
+  parseHardRulesFired,
+  encodeHardRulesFired,
+  parseDoctrineFlags,
+  parseFinancialsRecord,
+  evaluateHardRules,
+  recommendBandFromInputs,
+} from "./valuationAssessment";
+export type {
+  HardRuleId,
+  DoctrineFlag,
+  FinancialsConfidence,
+  FinancialsRecord,
+  HardRulesFired,
+} from "./valuationAssessment";
+
+export const valuationAssessments = sqliteTable("valuation_assessments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  firmId: integer("firm_id").notNull().references(() => companies.id),
+  evaluatorId: text("evaluator_id").notNull(),
+  mapAX: real("map_a_x"),
+  mapAY: real("map_a_y"),
+  valuationCategory: text("valuation_category"),
+  doctrineFlags: text("doctrine_flags"),
+  recommendedBand: text("recommended_band"),
+  finalBand: text("final_band"),
+  overrideReason: text("override_reason"),
+  hardRulesFired: text("hard_rules_fired").notNull(),
+  tapeId: text("tape_id").notNull(),
+  tapeAsOf: text("tape_as_of").notNull(),
+  bandRanges: text("band_ranges").notNull(),
+  conviction: real("conviction"),
+  narrative: text("narrative"),
+  scoredAt: text("scored_at").notNull(),
+  financialsJson: text("financials_json"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type ValuationAssessmentRow = typeof valuationAssessments.$inferSelect;
+
