@@ -164,7 +164,7 @@ test("expired and superseded tapes cannot be selected as current without overrid
 
   const overridden = svc.getCurrentApprovedTape({ tapeId: superseded.tapeId, override: true });
   assert.equal(overridden.overrideApplied, true);
-  assert.match(overridden.warning ?? "", /override/);
+  assert.match(overridden.warning ?? "", /Override applied/);
   assert.equal(overridden.tape?.tapeId, superseded.tapeId);
 
   // Force-expire the current approved tape and require override to select it.
@@ -350,7 +350,7 @@ test("API: draft → approve → current; reject approve without approver; overr
     assert.equal(forced.status, 200);
     const forcedBody = await forced.json();
     assert.equal(forcedBody.overrideApplied, true);
-    assert.match(forcedBody.warning, /override/);
+    assert.match(forcedBody.warning, /Override applied/);
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
