@@ -413,3 +413,39 @@ export const FINDING_TERMINAL_STATUSES: FindingStatus[] = [
   "rejected",
 ];
 
+// ============================================================
+// P3.2 ValuationTape (dated comps tape — not Content Studio–owned)
+// ============================================================
+export {
+  TAPE_STATUSES,
+  TAPE_GRACE_DAYS_MAX,
+  DEFAULT_DRAFTED_BY,
+  VALUATION_TAPE_CREATE_SQL,
+  ValuationTapeError,
+  computeExpiresAt,
+  parseBands,
+  encodeBands,
+  assertHumanApprover,
+  createDraftTapeSchema,
+  updateDraftTapeSchema,
+  approveTapeSchema,
+} from "./valuationTape";
+export type { TapeStatus, TapeBand } from "./valuationTape";
+
+export const valuationTapes = sqliteTable("valuation_tapes", {
+  tapeId: text("tape_id").primaryKey(),
+  asOf: text("as_of").notNull(),
+  expiresAt: text("expires_at"),
+  status: text("status").notNull().default("draft"),
+  approverId: text("approver_id"),
+  supersededBy: text("superseded_by"),
+  bands: text("bands"),
+  sourceNotes: text("source_notes"),
+  draftedBy: text("drafted_by"),
+  versionedBy: text("versioned_by"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type ValuationTapeRow = typeof valuationTapes.$inferSelect;
+
