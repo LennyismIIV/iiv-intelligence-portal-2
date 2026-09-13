@@ -222,3 +222,7 @@ export function requireAsOf(value: unknown, message = "Cannot mark approved with
 export function expiredOrSupersededWarning(status: TapeStatus): string {
   return `Tape is ${status} and cannot be selected as current without an explicit override.`;
 }
+
+export function overrideAppliedWarning(status: TapeStatus): string {
+  return `Override applied: this tape is ${status} and is only being treated as current because of an explicit override.`;
+}

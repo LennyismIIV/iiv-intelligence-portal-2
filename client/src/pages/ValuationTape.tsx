@@ -102,6 +102,7 @@ export default function ValuationTapePage() {
   const [overrideTape, setOverrideTape] = useState<ValuationTape | null>(null);
   const [overrideAck, setOverrideAck] = useState(false);
   const [overrideWarning, setOverrideWarning] = useState<string | null>(null);
+  const [overrideSelected, setOverrideSelected] = useState<ValuationTape | null>(null);
 
   const listQuery = useQuery<ValuationTape[]>({
     queryKey: ["/api/valuation-tapes", statusFilter],
@@ -187,8 +188,10 @@ export default function ValuationTapePage() {
       return body as CurrentResult;
     },
     onSuccess: (result) => {
+      setOverrideTape(null);
+      setOverrideSelected(result.tape);
       setOverrideWarning(result.warning ?? "Override applied — this tape is not the live approved current.");
-      toast({ title: "Override current (warning)", description: result.warning });
+      toast({ title: "Override applied (not live current)", description: result.warning });
     },
     onError: (err: any) => {
       toast({ title: "Cannot select as current", description: err?.message, variant: "destructive" });
@@ -244,8 +247,16 @@ export default function ValuationTapePage() {
         {overrideWarning && (
           <Alert variant="destructive" data-testid="override-warning">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Override current</AlertTitle>
-            <AlertDescription>{overrideWarning}</AlertDescription>
+            <AlertTitle>Override current (not the live approved tape)</AlertTitle>
+            <AlertDescription>
+              {overrideWarning}
+              {overrideSelected && (
+                <div className="mt-2 text-xs">
+                  Selected {overrideSelected.tapeId} · as_of {overrideSelected.asOf} · status {overrideSelected.status}.
+                  The banner above remains getCurrentApprovedTape() (approved, non-expired).
+                </div>
+              )}
+            </AlertDescription>
           </Alert>
         )}
 

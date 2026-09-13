@@ -10,6 +10,7 @@ import {
   computeExpiresAt,
   encodeBands,
   expiredOrSupersededWarning,
+  overrideAppliedWarning,
   isPastExpiry,
   normalizeDraftedBy,
   parseBands,
@@ -281,7 +282,7 @@ export function createValuationTapeService(sqlite: Database.Database) {
             tapeId: tape.tapeId,
           });
         }
-        return { tape, warning, overrideApplied: true };
+        return { tape, warning: overrideAppliedWarning(statusForWarn), overrideApplied: true };
       }
 
       return { tape };
