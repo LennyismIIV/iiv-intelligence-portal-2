@@ -1171,7 +1171,7 @@ export async function registerRoutes(
   app.post("/api/companies/:id/ship", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      res.json(await storage.shipScorecard(id));
+      res.json(await storage.shipScorecard(id, req.body || {}));
     } catch (err: any) {
       if (sendEvidenceError(err, res)) return;
       res.status(500).json({ message: err.message });

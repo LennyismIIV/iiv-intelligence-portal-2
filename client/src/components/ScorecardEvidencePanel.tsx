@@ -26,8 +26,9 @@ import type {
   MaterialClaimKey,
   EvidenceRecord,
   ScorecardQcResult,
+  Prd9Blocker,
 } from "@shared/schema";
-import { AlertOctagon, CheckCircle2, Download, Save, ShieldAlert, Ship } from "lucide-react";
+import { AlertOctagon, CheckCircle2, Clock, Download, Save, ShieldAlert, Ship } from "lucide-react";
 
 interface AssessmentSummary {
   id: number;
@@ -99,6 +100,8 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
   });
 
   const [rows, setRows] = useState<DraftRow[]>(() => MATERIAL_CLAIM_KEYS.map(emptyRow));
+  const [leonardHours, setLeonardHours] = useState("");
+  const [shippedBy, setShippedBy] = useState("");
 
   useEffect(() => {
     const byKey = new Map(evidence.map((e) => [e.claimKey, e]));
@@ -156,6 +159,13 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
     },
   });
 
+  const hoursValue = Number(leonardHours);
+  const hoursOk = Number.isFinite(hoursValue) && hoursValue > 0;
+  const shipBody = () => ({
+    leonardHours: hoursValue,
+    shippedBy: shippedBy.trim() || undefined,
+  });
+
   const downloadExport = async (format: "docx" | "pdf" | "json", draft = false) => {
     const qs = new URLSearchParams({ format });
     if (draft) qs.set("draft", "1");
@@ -187,17 +197,35 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
     URL.revokeObjectURL(url);
   };
 
+  const persistShipAfterClientExport = async () => {
+    if (!hoursOk) return;
+    const res = await apiRequest("POST", `/api/companies/${company.id}/ship`, shipBody());
+    return res.json();
+  };
+
   const exportDocx = useMutation({
-    mutationFn: () => downloadExport("docx"),
-    onSuccess: () => toast({ title: "Gen2 CEO Scorecard DOCX downloaded" }),
+    mutationFn: async () => {
+      await downloadExport("docx");
+      return persistShipAfterClientExport();
+    },
+    onSuccess: () => {
+      invalidate();
+      toast({ title: "Gen2 CEO Scorecard DOCX downloaded", description: "Hour log recorded on ship." });
+    },
     onError: (err: any) => {
       toast({ title: "Export blocked", description: err?.message || "QC failed", variant: "destructive" });
     },
   });
 
   const exportPdf = useMutation({
-    mutationFn: () => downloadExport("pdf"),
-    onSuccess: () => toast({ title: "Locked-send PDF downloaded" }),
+    mutationFn: async () => {
+      await downloadExport("pdf");
+      return persistShipAfterClientExport();
+    },
+    onSuccess: () => {
+      invalidate();
+      toast({ title: "Locked-send PDF downloaded", description: "Hour log recorded on ship." });
+    },
     onError: (err: any) => {
       toast({ title: "Export blocked", description: err?.message || "QC failed", variant: "destructive" });
     },
@@ -213,11 +241,18 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
 
   const ship = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/companies/${company.id}/ship`);
+      if (!hoursOk) {
+        throw new Error("Leonard hours are required and must be greater than 0.");
+      }
+      const res = await apiRequest("POST", `/api/companies/${company.id}/ship`, shipBody());
       return res.json();
     },
-    onSuccess: () => {
-      toast({ title: "Shipped", description: "Scorecard QC passed. Ship pathway is clear." });
+    onSuccess: (data) => {
+      invalidate();
+      toast({
+        title: "Shipped",
+        description: `Hour log recorded: ${data.leonardHours}h${data.shippedBy ? ` by ${data.shippedBy}` : ""}.`,
+      });
     },
     onError: (err: any) => {
       toast({ title: "Ship blocked", description: err?.message || "QC failed", variant: "destructive" });
@@ -228,6 +263,10 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
     () => qc?.missingClaimKeys.length ?? MATERIAL_CLAIM_KEYS.length,
     [qc],
   );
+
+  const prd9Rows: Prd9Blocker[] = (qc?.prd9 ?? []).filter((row) => row.id !== "evidence_grades");
+  const latestShip = qc?.latestShip ?? null;
+  const clientSendBlocked = !passed || !hoursOk;
 
   return (
     <div className="space-y-4" data-testid="scorecard-evidence-panel">
@@ -258,10 +297,28 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
           <p className="text-xs text-muted-foreground">
             Fail-closed: client DOCX / locked-send PDF stay red until every material claim has
             Evidence.grade and confidence. Internal draft is watermarked and may include [GAP]
-            placeholders. Undisclosed / speculative is allowed when labeled.
+            placeholders. Undisclosed / speculative is allowed when labeled. Ship and client
+            send require Leonard hours &gt; 0.
           </p>
         </CardHeader>
         <CardContent className="space-y-2">
+          {prd9Rows.map((row) => (
+            <div
+              key={row.id}
+              className="flex items-center justify-between gap-3 text-sm"
+              data-testid={`qc-prd9-${row.id}`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {row.passed
+                  ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  : <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+                <span className="truncate">{row.label}</span>
+              </div>
+              <span className={`text-xs text-right ${row.passed ? "text-emerald-400" : "text-red-400"}`}>
+                {row.detail}
+              </span>
+            </div>
+          ))}
           {(qc?.claims ?? MATERIAL_CLAIM_KEYS.map((claimKey) => ({
             claimKey,
             label: MATERIAL_CLAIM_LABELS[claimKey],
@@ -290,12 +347,57 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
               </span>
             </div>
           ))}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="leonard-hours">Leonard hours</Label>
+              <Input
+                id="leonard-hours"
+                type="number"
+                min={0.1}
+                step={0.25}
+                inputMode="decimal"
+                value={leonardHours}
+                onChange={(e) => setLeonardHours(e.target.value)}
+                placeholder="Hours spent reviewing"
+                data-testid="input-leonard-hours"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="shipped-by">Shipped by (optional)</Label>
+              <Input
+                id="shipped-by"
+                value={shippedBy}
+                onChange={(e) => setShippedBy(e.target.value)}
+                placeholder="Leonard"
+                data-testid="input-shipped-by"
+              />
+            </div>
+          </div>
+          {!hoursOk && (
+            <div
+              className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+              data-testid="hours-required-warning"
+            >
+              Ship and client send require Leonard hours greater than 0. Hours are not invented.
+            </div>
+          )}
+          {latestShip && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="latest-ship-meta">
+              <Clock className="w-3.5 h-3.5" />
+              Last shipped {latestShip.shippedAt}
+              {latestShip.shippedBy ? ` by ${latestShip.shippedBy}` : ""}
+              {" · "}
+              {latestShip.leonardHours}h logged
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-2 pt-2">
             <Button
               size="sm"
               variant="outline"
               onClick={() => exportDocx.mutate()}
-              disabled={!passed || exportDocx.isPending}
+              disabled={clientSendBlocked || exportDocx.isPending}
               data-testid="button-export-scorecard"
             >
               <Download className="w-3.5 h-3.5 mr-1.5" />
@@ -305,7 +407,7 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
               size="sm"
               variant="outline"
               onClick={() => exportPdf.mutate()}
-              disabled={!passed || exportPdf.isPending}
+              disabled={clientSendBlocked || exportPdf.isPending}
               data-testid="button-export-scorecard-pdf"
             >
               <Download className="w-3.5 h-3.5 mr-1.5" />
@@ -324,7 +426,7 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
               size="sm"
               variant="outline"
               onClick={() => ship.mutate()}
-              disabled={!passed || ship.isPending}
+              disabled={clientSendBlocked || ship.isPending}
               data-testid="button-ship-scorecard"
             >
               <Ship className="w-3.5 h-3.5 mr-1.5" />

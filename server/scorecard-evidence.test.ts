@@ -6,13 +6,17 @@ import {
   EVIDENCE_CONFIDENCE,
   MATERIAL_CLAIM_KEYS,
   SCORECARD_EVIDENCE_CREATE_SQL,
+  SCORECARD_SHIP_CREATE_SQL,
   ScorecardEvidenceError,
+  evaluatePrd9Blockers,
   evaluateScorecardQc,
   isGen2VaultPath,
   parseEvidenceWrite,
   parseGrade,
   parseConfidence,
   parseClaimKey,
+  parseLeonardHours,
+  parseShippedBy,
   assertNoGen2VaultOnGreenbookVisible,
 } from "../shared/scorecardEvidence.ts";
 import { VALUATION_TAPE_CREATE_SQL } from "../shared/valuationTape.ts";
@@ -46,6 +50,7 @@ function mem() {
   db.exec(VALUATION_TAPE_CREATE_SQL);
   db.exec(VALUATION_ASSESSMENT_CREATE_SQL);
   db.exec(SCORECARD_EVIDENCE_CREATE_SQL);
+  db.exec(SCORECARD_SHIP_CREATE_SQL);
   const firm = db.prepare("INSERT INTO companies (name, gen2_relationship) VALUES (?, ?)").run(
     "Acme Insights",
     "/Vault/Gen2/acme/scorecard.docx",
@@ -220,8 +225,20 @@ test("service QC / export / ship fail closed until all six claims are graded", (
   assert.equal(exported.evidence.length, 6);
   assert.equal(exported.qc.passed, true);
 
-  const shipped = evidence.ship(firmId);
+  const shipped = evidence.ship(firmId, { leonard_hours: 1.5, shipped_by: "Leonard" });
   assert.equal(shipped.shipped, true);
+  assert.equal(shipped.leonardHours, 1.5);
+  assert.equal(shipped.reviewerHours, 1.5);
+  assert.equal(shipped.shippedBy, "Leonard");
+  assert.ok(shipped.shippedAt);
+  const persisted = db.prepare("SELECT * FROM scorecard_ships WHERE company_id = ?").get(firmId) as {
+    leonard_hours: number;
+    shipped_by: string;
+    shipped_at: string;
+  };
+  assert.equal(persisted.leonard_hours, 1.5);
+  assert.equal(persisted.shipped_by, "Leonard");
+  assert.equal(persisted.shipped_at, shipped.shippedAt);
 
   // Evidence must not auto-copy the firm's Gen2 vault path onto a greenbook row.
   const gen2Path = db.prepare("SELECT gen2_relationship FROM companies WHERE id = ?").get(firmId) as {
@@ -288,7 +305,7 @@ test("API QC / export / ship fail closed; complete set exports", async () => {
     } catch (err) { sendErr(err, res); }
   });
   app.post("/api/companies/:id/ship", (req, res) => {
-    try { res.json(evidence.ship(parseInt(req.params.id))); }
+    try { res.json(evidence.ship(parseInt(req.params.id), req.body || {})); }
     catch (err) { sendErr(err, res); }
   });
 
@@ -334,10 +351,120 @@ test("API QC / export / ship fail closed; complete set exports", async () => {
   assert.equal(exported.status, 200);
   const decile = await fetch(`${base}/api/companies/${firmId}/export/decile`);
   assert.equal(decile.status, 200);
-  const shipped = await fetch(`${base}/api/companies/${firmId}/ship`, { method: "POST" });
+  const shippedNoHours = await fetch(`${base}/api/companies/${firmId}/ship`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(shippedNoHours.status, 400);
+  assert.match((await shippedNoHours.json()).message, /leonard_hours/);
+
+  const shipped = await fetch(`${base}/api/companies/${firmId}/ship`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviewer_hours: 2, shipped_by: "Leonard" }),
+  });
   assert.equal(shipped.status, 200);
+  const shippedJson = await shipped.json();
+  assert.equal(shippedJson.leonardHours, 2);
+  assert.equal(shippedJson.shippedBy, "Leonard");
+
+  const qcAfterShip = await (await fetch(`${base}/api/companies/${firmId}/scorecard-qc`)).json();
+  assert.equal(qcAfterShip.latestShip.leonardHours, 2);
+  assert.equal(qcAfterShip.latestShip.shippedBy, "Leonard");
+  assert.ok(qcAfterShip.prd9.some((b: { id: string }) => b.id === "tape_current"));
+  assert.ok(qcAfterShip.prd9.some((b: { id: string }) => b.id === "hard_rules_fired"));
+  assert.ok(qcAfterShip.prd9.some((b: { id: string }) => b.id === "tape_as_of"));
 
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
+});
+
+test("leonard_hours / reviewer_hours required and must be > 0", () => {
+  assert.throws(() => parseLeonardHours({}), /leonard_hours is required/);
+  assert.throws(() => parseLeonardHours({ leonard_hours: 0 }), /greater than 0/);
+  assert.throws(() => parseLeonardHours({ reviewerHours: -1 }), /greater than 0/);
+  assert.throws(() => parseLeonardHours({ leonardHours: "abc" }), /greater than 0/);
+  assert.equal(parseLeonardHours({ leonard_hours: 3 }), 3);
+  assert.equal(parseLeonardHours({ reviewer_hours: "1.25" }), 1.25);
+  assert.equal(parseShippedBy({ shipped_by: " Leonard " }), "Leonard");
+  assert.equal(parseShippedBy({}), null);
+});
+
+test("PRD §9 blockers mirror tape blank/stale, grades, hard_rules_fired, tape_as_of", () => {
+  const empty = evaluatePrd9Blockers({
+    tape: null,
+    assessment: null,
+    evidencePassed: false,
+    missingClaimCount: 6,
+  });
+  assert.equal(empty.find((b) => b.id === "tape_current")?.passed, false);
+  assert.match(empty.find((b) => b.id === "tape_current")!.detail, /blank/);
+  assert.equal(empty.find((b) => b.id === "evidence_grades")?.passed, false);
+  assert.equal(empty.find((b) => b.id === "hard_rules_fired")?.passed, false);
+  assert.equal(empty.find((b) => b.id === "tape_as_of")?.passed, false);
+
+  const stale = evaluatePrd9Blockers({
+    tape: { status: "expired", asOf: "2026-01-15" },
+    assessment: { hardRulesFired: "none", tapeAsOf: "2026-01-15" },
+    evidencePassed: true,
+    missingClaimCount: 0,
+  });
+  assert.equal(stale.find((b) => b.id === "tape_current")?.passed, false);
+  assert.match(stale.find((b) => b.id === "tape_current")!.detail, /stale/);
+  assert.equal(stale.find((b) => b.id === "hard_rules_fired")?.passed, true);
+  assert.equal(stale.find((b) => b.id === "tape_as_of")?.passed, true);
+
+  const green = evaluatePrd9Blockers({
+    tape: { status: "approved", asOf: "2026-09-01" },
+    assessment: { hardRulesFired: ["services_floor"], tapeAsOf: "2026-09-01" },
+    evidencePassed: true,
+    missingClaimCount: 0,
+  });
+  assert.ok(green.every((b) => b.passed));
+});
+
+test("service QC surfaces PRD §9 rows; ship without hours fails after evidence is complete", () => {
+  const { tapes, assessments, evidence, firmId, db } = mem();
+  evidence.upsertMany(firmId, completeSix());
+
+  assert.throws(
+    () => evidence.ship(firmId, {}),
+    (err: unknown) =>
+      err instanceof ScorecardEvidenceError
+      && err.statusCode === 400
+      && /leonard_hours/.test(err.message),
+  );
+
+  const qcBlank = evidence.qc(firmId);
+  assert.equal(qcBlank.passed, true);
+  assert.equal(qcBlank.prd9.find((b) => b.id === "tape_current")?.passed, false);
+  assert.equal(qcBlank.prd9.find((b) => b.id === "hard_rules_fired")?.passed, false);
+  assert.equal(qcBlank.prd9.find((b) => b.id === "tape_as_of")?.passed, false);
+
+  const draft = tapes.createDraft({
+    as_of: liveAsOf(0),
+    drafted_by: "Signal Desk",
+    bands: [{ band_id: "ai_first_defensible", ma_rev: { low: 21, high: 29 } }],
+  });
+  const tape = tapes.approve(draft.tapeId, { approver_id: "Leonard" });
+  assessments.create(firmId, {
+    evaluator_id: "judge-test",
+    recommended_band: "ai_first_defensible",
+    final_band: "ai_first_defensible",
+    hard_rules_fired: "none",
+    tape_id: tape.tapeId,
+  });
+
+  const qcReady = evidence.qc(firmId);
+  assert.equal(qcReady.prd9.find((b) => b.id === "tape_current")?.passed, true);
+  assert.equal(qcReady.prd9.find((b) => b.id === "hard_rules_fired")?.passed, true);
+  assert.equal(qcReady.prd9.find((b) => b.id === "tape_as_of")?.passed, true);
+
+  const shipped = evidence.ship(firmId, { leonardHours: 0.5, shippedBy: "Leonard" });
+  assert.equal(shipped.leonardHours, 0.5);
+  assert.equal(evidence.latestShip(firmId)?.leonardHours, 0.5);
+  const count = db.prepare("SELECT COUNT(*) AS n FROM scorecard_ships").get() as { n: number };
+  assert.equal(count.n, 1);
 });

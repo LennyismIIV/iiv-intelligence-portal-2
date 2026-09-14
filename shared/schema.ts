@@ -518,6 +518,7 @@ export {
   CONTROL_POINT_LABELS,
   AI_ON_CONTROL_POINT_RESULTS,
   SCORECARD_EVIDENCE_CREATE_SQL,
+  SCORECARD_SHIP_CREATE_SQL,
   ScorecardEvidenceError,
   parseClaimKey,
   parseGrade,
@@ -526,6 +527,10 @@ export {
   assertNoGen2VaultOnGreenbookVisible,
   parseEvidenceWrite,
   evaluateScorecardQc,
+  evaluatePrd9Blockers,
+  parseLeonardHours,
+  parseShippedBy,
+  hoursLogged,
   qcBlockedError,
   isAssessmentClaim,
 } from "./scorecardEvidence";
@@ -538,6 +543,10 @@ export type {
   EvidenceRecord,
   ScorecardQcResult,
   QcClaimStatus,
+  Prd9Blocker,
+  Prd9BlockerId,
+  ScorecardShipRecord,
+  ScorecardShipResult,
 } from "./scorecardEvidence";
 
 export const scorecardEvidence = sqliteTable("scorecard_evidence", {
@@ -557,6 +566,17 @@ export const scorecardEvidence = sqliteTable("scorecard_evidence", {
 });
 
 export type ScorecardEvidenceRow = typeof scorecardEvidence.$inferSelect;
+
+export const scorecardShips = sqliteTable("scorecard_ships", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  shippedAt: text("shipped_at").notNull(),
+  shippedBy: text("shipped_by"),
+  leonardHours: real("leonard_hours").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type ScorecardShipRow = typeof scorecardShips.$inferSelect;
 
 // ============================================================
 // P3.5 Gen2 CEO Scorecard export (DOCX primary + locked-send PDF)
