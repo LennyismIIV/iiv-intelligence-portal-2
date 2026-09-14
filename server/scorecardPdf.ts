@@ -8,10 +8,11 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import {
   DRAFT_WATERMARK,
   INSTRUMENT_A_NAME,
+  IIV_SCORECARD_BRAND,
   LOCKED_SEND_LABEL,
-  SCORECARD_BRAND,
-  SCORECARD_EDITION,
   SECTION_TITLES,
+  editionHeaderLabel,
+  editionProductTitle,
   type ScorecardDocument,
   type ScorecardSectionId,
 } from "@shared/scorecardExport";
@@ -60,17 +61,19 @@ function wrap(text: string, max = 92): string[] {
  */
 export async function renderScorecardPdf(doc: ScorecardDocument): Promise<Buffer> {
   const pdf = await PDFDocument.create();
-  pdf.setTitle(`${SCORECARD_BRAND} ${SCORECARD_EDITION} Scorecard - ${doc.firmName}`);
-  pdf.setAuthor(SCORECARD_BRAND);
+  const product = editionProductTitle(doc);
+  const portal = doc.brand === IIV_SCORECARD_BRAND ? "IIV Intelligence Portal" : "Gen2 Portal";
+  pdf.setTitle(`${product} - ${doc.firmName}`);
+  pdf.setAuthor(doc.brand);
   pdf.setSubject(pdfSafe(INSTRUMENT_A_NAME));
   pdf.setKeywords([
-    SCORECARD_BRAND,
-    SCORECARD_EDITION,
-    LOCKED_SEND_LABEL,
-    ...Object.values(SECTION_TITLES).map(pdfSafe),
+    doc.brand,
+    doc.edition,
+    ...(doc.brand === IIV_SCORECARD_BRAND ? [] : [LOCKED_SEND_LABEL]),
+    ...doc.sections.map((s) => pdfSafe(s.title)),
   ]);
-  pdf.setProducer(`${SCORECARD_BRAND} Portal`);
-  pdf.setCreator(`${SCORECARD_BRAND} CEO Scorecard`);
+  pdf.setProducer(portal);
+  pdf.setCreator(product);
 
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -93,7 +96,7 @@ export async function renderScorecardPdf(doc: ScorecardDocument): Promise<Buffer
       height: 36,
       color: NAVY,
     });
-    page.drawText(pdfSafe(`${SCORECARD_BRAND}  |  ${SCORECARD_EDITION} Reclassification Scorecard  |  ${doc.firmName}`), {
+    page.drawText(pdfSafe(`${editionHeaderLabel(doc)}  |  ${doc.firmName}`), {
       x: margin,
       y: pageHeight - 22,
       size: 9,
@@ -109,8 +112,8 @@ export async function renderScorecardPdf(doc: ScorecardDocument): Promise<Buffer
     });
     const footerBits = [
       pdfSafe(INSTRUMENT_A_NAME),
-      SCORECARD_BRAND,
-      LOCKED_SEND_LABEL,
+      doc.brand,
+      ...(doc.brand === IIV_SCORECARD_BRAND ? [] : [LOCKED_SEND_LABEL]),
     ];
     if (doc.draft) footerBits.push(pdfSafe(DRAFT_WATERMARK));
     page.drawText(footerBits.join("  |  "), {
@@ -139,7 +142,7 @@ export async function renderScorecardPdf(doc: ScorecardDocument): Promise<Buffer
 
   drawChrome();
 
-  const title = pdfSafe(`${SCORECARD_BRAND} CEO Reclassification Scorecard`);
+  const title = pdfSafe(editionProductTitle(doc));
   page.drawText(title, { x: margin, y, size: 16, font: fontBold, color: NAVY });
   y -= 18;
   page.drawText(pdfSafe(INSTRUMENT_A_NAME), { x: margin, y, size: 9, font: fontOblique, color: MUTED });

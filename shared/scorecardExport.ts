@@ -1,9 +1,10 @@
 /**
- * P3.5 Gen2 CEO Reclassification Scorecard — document model + SoR assembly.
+ * P3.5 Gen2 CEO Reclassification Scorecard + P3.6 IIV verdict edition.
  *
- * Extends the P3.4 Scorecard export (evidence + fail-closed QC) into the
- * PRD section order. Empty/partial SoR becomes labeled placeholders + gap
- * flags. Never invents multiples, Map B, or Greenbook branding.
+ * Both editions share one Scorecard graph (Map A, posture, tape-dated band,
+ * evidence). Gen2 forks Implication Trifecta / 90-day agenda; IIV forks
+ * verdict + Portal blockers. Empty/partial SoR becomes labeled placeholders
+ * + gap flags. Never invents multiples, Map B, or Greenbook branding.
  */
 
 import {
@@ -26,11 +27,32 @@ import {
 } from "./scorecardFields";
 import { HARD_RULE_LABELS, type HardRuleId } from "./valuationAssessment";
 import type { TapeBand } from "./valuationTape";
+import {
+  DEFAULT_IIV_VERDICT,
+  FORBIDDEN_IIV_EDITION_TERMS,
+  IIV_PRODUCT_TITLE,
+  IIV_SCORECARD_BRAND,
+  IIV_SCORECARD_EDITION,
+  IIV_SCORECARD_FORMAT,
+  collectIivBlockers,
+  normalizeStoredVerdict,
+  type IivBlocker,
+  type IivDecisionInput,
+  type IivVerdict,
+} from "./scorecardVerdict";
 
 export const SCORECARD_BRAND = "Gen2" as const;
 export const SCORECARD_EDITION = "CEO" as const;
 export const SCORECARD_FORMAT = "gen2-ceo-scorecard-v1" as const;
 export const EVIDENCE_FORMAT = "iiv-scorecard-evidence-v1" as const;
+export {
+  IIV_SCORECARD_BRAND,
+  IIV_SCORECARD_EDITION,
+  IIV_SCORECARD_FORMAT,
+  IIV_PRODUCT_TITLE,
+  FORBIDDEN_IIV_EDITION_TERMS,
+  DEFAULT_IIV_VERDICT,
+};
 
 /** Exact Instrument A name — header, footer, and Map A section. */
 export const INSTRUMENT_A_NAME =
@@ -44,17 +66,30 @@ export const GAP_PREFIX = "[GAP]";
 
 export const FORBIDDEN_CEO_EDITION_TERMS = ["Greenbook", "Map B", "Instrument B"] as const;
 
-export const SECTION_IDS = [
+export const SHARED_SECTION_IDS = [
   "header",
   "map_a",
   "strategic_posture",
   "valuation_category_band",
   "control_point_read",
   "ai_on_control_point",
+] as const;
+
+export const SECTION_IDS = [
+  ...SHARED_SECTION_IDS,
   "implication_trifecta",
   "evidence_appendix",
 ] as const;
-export type ScorecardSectionId = (typeof SECTION_IDS)[number];
+
+export const IIV_SECTION_IDS = [
+  ...SHARED_SECTION_IDS,
+  "iiv_verdict",
+  "evidence_appendix",
+] as const;
+
+export type ScorecardSectionId =
+  | (typeof SECTION_IDS)[number]
+  | (typeof IIV_SECTION_IDS)[number];
 
 export const SECTION_TITLES: Record<ScorecardSectionId, string> = {
   header: "1. Header",
@@ -64,6 +99,7 @@ export const SECTION_TITLES: Record<ScorecardSectionId, string> = {
   control_point_read: "5. Control-point read",
   ai_on_control_point: "6. AI-on-control-point test",
   implication_trifecta: "7a. Implication Trifecta",
+  iiv_verdict: "7. IIV verdict + blockers",
   evidence_appendix: "8. Evidence appendix",
 };
 
@@ -142,12 +178,27 @@ export interface ScorecardExportInput {
   qc: ScorecardQcResult;
   exportedAt: string;
   draft: boolean;
+  iivVerdict?: IivVerdict | null;
+  decision?: IivDecisionInput | null;
+}
+
+export type ScorecardBrandName = typeof SCORECARD_BRAND | typeof IIV_SCORECARD_BRAND;
+export type ScorecardEditionName = typeof SCORECARD_EDITION | typeof IIV_SCORECARD_EDITION;
+export type ScorecardFormatName = typeof SCORECARD_FORMAT | typeof IIV_SCORECARD_FORMAT;
+
+export interface IivVerdictSection {
+  verdict: ExportField;
+  investWritable: ExportField;
+  blockers: ExportField[];
+  gaps: ExportField[];
+  ledgerPresent: boolean;
+  investHardBlocked: boolean;
 }
 
 export interface ScorecardDocument {
-  format: typeof SCORECARD_FORMAT;
-  edition: typeof SCORECARD_EDITION;
-  brand: typeof SCORECARD_BRAND;
+  format: ScorecardFormatName;
+  edition: ScorecardEditionName;
+  brand: ScorecardBrandName;
   instrumentA: typeof INSTRUMENT_A_NAME;
   draft: boolean;
   watermark: string | null;
@@ -156,6 +207,7 @@ export interface ScorecardDocument {
   scorecardDate: string;
   sections: ScorecardSection[];
   gaps: GapFlag[];
+  verdict: IivVerdictSection | null;
   header: {
     firmName: ExportField;
     scorecardDate: ExportField;
@@ -358,6 +410,22 @@ export function forbiddenCeoEditionHits(text: string): string[] {
   return FORBIDDEN_CEO_EDITION_TERMS.filter((term) => text.includes(term));
 }
 
+export function forbiddenIivEditionHits(text: string): string[] {
+  return FORBIDDEN_IIV_EDITION_TERMS.filter((term) => text.includes(term));
+}
+
+export function editionProductTitle(doc: Pick<ScorecardDocument, "brand">): string {
+  return doc.brand === IIV_SCORECARD_BRAND
+    ? IIV_PRODUCT_TITLE
+    : "Gen2 CEO Reclassification Scorecard";
+}
+
+export function editionHeaderLabel(doc: Pick<ScorecardDocument, "brand" | "edition">): string {
+  return doc.brand === IIV_SCORECARD_BRAND
+    ? "IIV  ·  Verdict Scorecard"
+    : `${SCORECARD_BRAND}  ·  ${SCORECARD_EDITION} Reclassification Scorecard`;
+}
+
 export function flattenDocumentText(doc: ScorecardDocument): string {
   const sectionText = doc.sections
     .map((s) => [s.title, ...s.blocks].join("\n"))
@@ -375,12 +443,26 @@ export function sectionOrderOf(doc: ScorecardDocument): ScorecardSectionId[] {
   return doc.sections.map((s) => s.id);
 }
 
+export interface SharedScorecardGraph {
+  scorecardDate: string;
+  header: ScorecardDocument["header"];
+  mapA: ScorecardDocument["mapA"];
+  strategicPosture: ScorecardDocument["strategicPosture"];
+  valuation: ScorecardDocument["valuation"];
+  controlPoint: ScorecardDocument["controlPoint"];
+  aiOnControlPoint: ScorecardDocument["aiOnControlPoint"];
+  appendix: ScorecardDocument["appendix"];
+}
+
 /**
- * Assemble the Gen2 CEO Scorecard from Portal SoR only.
- * Missing values become [GAP] placeholders — never invented multiples.
+ * Shared Map A / posture / tape / evidence graph for both Gen2 CEO and IIV
+ * editions. Brand is the only edition-specific header field.
  */
-export function assembleScorecardDocument(input: ScorecardExportInput): ScorecardDocument {
-  const { firm, assessment, tape, evidence, exportedAt, draft } = input;
+export function assembleSharedScorecardGraph(
+  input: ScorecardExportInput,
+  brand: ScorecardBrandName,
+): SharedScorecardGraph {
+  const { firm, assessment, tape, evidence, exportedAt } = input;
   const byClaim = evidenceByClaim(evidence);
   const scorecardDate = scorecardDateFrom(exportedAt);
 
@@ -394,7 +476,7 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
       assessment?.tapeAsOf ?? tape?.asOf ?? null,
       "tape_as_of unavailable — no approved ValuationTape snapshot",
     ),
-    brand: presentField("brand", "Brand", SCORECARD_BRAND),
+    brand: presentField("brand", "Brand", brand),
     evaluator: fieldFrom("evaluator", "Evaluator", assessment?.evaluatorId ?? null, "Evaluator unavailable — no ValuationAssessment"),
     confidenceRollup: rollupConfidence(evidence),
   };
@@ -521,7 +603,39 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
     ),
   };
 
-  const trifecta = {
+  const appendix = MATERIAL_CLAIM_KEYS.map((claimKey) => {
+    const ev = byClaim[claimKey];
+    return {
+      claimKey,
+      label: MATERIAL_CLAIM_LABELS[claimKey],
+      claimValue: fieldFrom(
+        `${claimKey}_value`,
+        "Claim value",
+        ev?.claimValue ?? null,
+        "Claim value not set",
+      ),
+      grade: gradeField(ev, `${claimKey}_grade`, "Grade"),
+      confidence: ev?.confidence
+        ? presentField(`${claimKey}_confidence`, "Confidence", EVIDENCE_CONFIDENCE_LABELS[ev.confidence])
+        : gapField(`${claimKey}_confidence`, "Confidence", "Evidence.confidence not set"),
+      notes: fieldFrom(`${claimKey}_notes`, "Notes", ev?.notes ?? null, "Notes not set"),
+    };
+  });
+
+  return {
+    scorecardDate,
+    header,
+    mapA,
+    strategicPosture,
+    valuation,
+    controlPoint,
+    aiOnControlPoint,
+    appendix,
+  };
+}
+
+function emptyTrifecta(): ScorecardDocument["trifecta"] {
+  return {
     supplier: gapField(
       "implication_supplier",
       "Supplier implication",
@@ -545,41 +659,11 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
       ),
     ),
   };
+}
 
-  const appendix = MATERIAL_CLAIM_KEYS.map((claimKey) => {
-    const ev = byClaim[claimKey];
-    return {
-      claimKey,
-      label: MATERIAL_CLAIM_LABELS[claimKey],
-      claimValue: fieldFrom(
-        `${claimKey}_value`,
-        "Claim value",
-        ev?.claimValue ?? null,
-        "Claim value not set",
-      ),
-      grade: gradeField(ev, `${claimKey}_grade`, "Grade"),
-      confidence: ev?.confidence
-        ? presentField(`${claimKey}_confidence`, "Confidence", EVIDENCE_CONFIDENCE_LABELS[ev.confidence])
-        : gapField(`${claimKey}_confidence`, "Confidence", "Evidence.confidence not set"),
-      notes: fieldFrom(`${claimKey}_notes`, "Notes", ev?.notes ?? null, "Notes not set"),
-    };
-  });
-
-  const allFields: ExportField[] = [
-    ...Object.values(header),
-    ...Object.values(mapA),
-    ...Object.values(strategicPosture),
-    ...Object.values(valuation),
-    ...Object.values(controlPoint),
-    ...Object.values(aiOnControlPoint),
-    trifecta.supplier,
-    trifecta.buyer,
-    trifecta.investor,
-    ...trifecta.agenda,
-    ...appendix.flatMap((row) => [row.claimValue, row.grade, row.confidence, row.notes]),
-  ];
-
-  const sections: ScorecardSection[] = [
+function sharedGraphSections(graph: SharedScorecardGraph, edition: ScorecardEditionName): ScorecardSection[] {
+  const { header, mapA, strategicPosture, valuation, controlPoint, aiOnControlPoint } = graph;
+  return [
     {
       id: "header",
       title: SECTION_TITLES.header,
@@ -589,7 +673,7 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
         line(header.scoredAt),
         line(header.tapeAsOf),
         line(header.brand),
-        `Edition: ${SCORECARD_EDITION}`,
+        `Edition: ${edition}`,
         line(header.evaluator),
         line(header.confidenceRollup),
       ],
@@ -647,6 +731,48 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
         "Doctrine: reclassification is not automation.",
       ],
     },
+  ];
+}
+
+function appendixSection(appendix: ScorecardDocument["appendix"]): ScorecardSection {
+  return {
+    id: "evidence_appendix",
+    title: SECTION_TITLES.evidence_appendix,
+    blocks: appendix.flatMap((row) => [
+      `${row.label} (${row.claimKey})`,
+      line(row.claimValue),
+      line(row.grade),
+      line(row.confidence),
+      line(row.notes),
+    ]),
+  };
+}
+
+/**
+ * Assemble the Gen2 CEO Scorecard from Portal SoR only.
+ * Missing values become [GAP] placeholders — never invented multiples.
+ */
+export function assembleScorecardDocument(input: ScorecardExportInput): ScorecardDocument {
+  const graph = assembleSharedScorecardGraph(input, SCORECARD_BRAND);
+  const { header, mapA, strategicPosture, valuation, controlPoint, aiOnControlPoint, appendix, scorecardDate } = graph;
+  const trifecta = emptyTrifecta();
+
+  const allFields: ExportField[] = [
+    ...Object.values(header),
+    ...Object.values(mapA),
+    ...Object.values(strategicPosture),
+    ...Object.values(valuation),
+    ...Object.values(controlPoint),
+    ...Object.values(aiOnControlPoint),
+    trifecta.supplier,
+    trifecta.buyer,
+    trifecta.investor,
+    ...trifecta.agenda,
+    ...appendix.flatMap((row) => [row.claimValue, row.grade, row.confidence, row.notes]),
+  ];
+
+  const sections: ScorecardSection[] = [
+    ...sharedGraphSections(graph, SCORECARD_EDITION),
     {
       id: "implication_trifecta",
       title: SECTION_TITLES.implication_trifecta,
@@ -658,17 +784,7 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
         ...trifecta.agenda.map(line),
       ],
     },
-    {
-      id: "evidence_appendix",
-      title: SECTION_TITLES.evidence_appendix,
-      blocks: appendix.flatMap((row) => [
-        `${row.label} (${row.claimKey})`,
-        line(row.claimValue),
-        line(row.grade),
-        line(row.confidence),
-        line(row.notes),
-      ]),
-    },
+    appendixSection(appendix),
   ];
 
   const doc: ScorecardDocument = {
@@ -676,13 +792,14 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
     edition: SCORECARD_EDITION,
     brand: SCORECARD_BRAND,
     instrumentA: INSTRUMENT_A_NAME,
-    draft,
-    watermark: draft ? DRAFT_WATERMARK : null,
-    exportedAt,
-    firmName: firm.name,
+    draft: input.draft,
+    watermark: input.draft ? DRAFT_WATERMARK : null,
+    exportedAt: input.exportedAt,
+    firmName: input.firm.name,
     scorecardDate,
     sections,
     gaps: collectGaps(allFields),
+    verdict: null,
     header,
     mapA,
     strategicPosture,
@@ -696,6 +813,127 @@ export function assembleScorecardDocument(input: ScorecardExportInput): Scorecar
   const hits = forbiddenCeoEditionHits(flattenDocumentText(doc));
   if (hits.length) {
     throw new Error(`Gen2 CEO Scorecard must not include: ${hits.join(", ")}`);
+  }
+
+  return doc;
+}
+
+function assembleIivVerdictSection(input: ScorecardExportInput): IivVerdictSection {
+  const verdictValue = normalizeStoredVerdict(input.iivVerdict);
+  const collected = collectIivBlockers(input.decision);
+  const displayItems: IivBlocker[] = collected.ledgerPresent
+    ? collected.blockers
+    : collected.gaps;
+
+  const blockerFields = displayItems.length
+    ? displayItems.map((b, i) => {
+        const prefix = b.severity === "block"
+          ? "BLOCK"
+          : b.severity === "warn"
+            ? "WARN"
+            : GAP_PREFIX;
+        return b.severity === "gap"
+          ? gapField(`iiv_blocker_${b.code || i}`, b.label, b.detail)
+          : presentField(
+            `iiv_blocker_${b.code || i}`,
+            `${prefix} · ${b.label}`,
+            b.detail,
+          );
+      })
+    : [
+        presentField(
+          "iiv_blockers_none",
+          "Blockers",
+          "No open critical Findings, failed Gates, or DimensionFloors.",
+        ),
+      ];
+
+  const gapFields = collected.ledgerPresent
+    ? collected.gaps.map((g) => gapField(`iiv_gap_${g.code}`, g.label, g.detail))
+    : collected.gaps.map((g) => gapField(`iiv_gap_${g.code}`, g.label, g.detail));
+
+  return {
+    verdict: presentField("iiv_verdict", "IIV verdict", verdictValue),
+    investWritable: collected.investHardBlocked
+      ? presentField(
+        "iiv_invest_writable",
+        "INVEST writable",
+        "No — open critical/high Findings, failed Gates, or open G2 block INVEST",
+      )
+      : presentField("iiv_invest_writable", "INVEST writable", "Yes"),
+    blockers: blockerFields,
+    gaps: gapFields,
+    ledgerPresent: collected.ledgerPresent,
+    investHardBlocked: collected.investHardBlocked,
+  };
+}
+
+/**
+ * IIV verdict edition over the same Scorecard graph as Gen2 CEO.
+ * Replaces Implication Trifecta / 90-day agenda with verdict + blockers.
+ */
+export function assembleIivVerdictDocument(input: ScorecardExportInput): ScorecardDocument {
+  const graph = assembleSharedScorecardGraph(input, IIV_SCORECARD_BRAND);
+  const { header, mapA, strategicPosture, valuation, controlPoint, aiOnControlPoint, appendix, scorecardDate } = graph;
+  const verdict = assembleIivVerdictSection(input);
+  const trifecta = emptyTrifecta();
+
+  const allFields: ExportField[] = [
+    ...Object.values(header),
+    ...Object.values(mapA),
+    ...Object.values(strategicPosture),
+    ...Object.values(valuation),
+    ...Object.values(controlPoint),
+    ...Object.values(aiOnControlPoint),
+    verdict.verdict,
+    verdict.investWritable,
+    ...verdict.blockers,
+    ...verdict.gaps,
+    ...appendix.flatMap((row) => [row.claimValue, row.grade, row.confidence, row.notes]),
+  ];
+
+  const sections: ScorecardSection[] = [
+    ...sharedGraphSections(graph, IIV_SCORECARD_EDITION),
+    {
+      id: "iiv_verdict",
+      title: SECTION_TITLES.iiv_verdict,
+      blocks: [
+        "IIV IC verdict. Open critical Findings, failed Gates, and DimensionFloors (when recorded) are listed as blockers — never invented.",
+        line(verdict.verdict),
+        line(verdict.investWritable),
+        ...verdict.blockers.map(line),
+        ...(verdict.ledgerPresent ? verdict.gaps.map(line) : []),
+      ],
+    },
+    appendixSection(appendix),
+  ];
+
+  const doc: ScorecardDocument = {
+    format: IIV_SCORECARD_FORMAT,
+    edition: IIV_SCORECARD_EDITION,
+    brand: IIV_SCORECARD_BRAND,
+    instrumentA: INSTRUMENT_A_NAME,
+    draft: input.draft,
+    watermark: input.draft ? DRAFT_WATERMARK : null,
+    exportedAt: input.exportedAt,
+    firmName: input.firm.name,
+    scorecardDate,
+    sections,
+    gaps: collectGaps(allFields),
+    verdict,
+    header,
+    mapA,
+    strategicPosture,
+    valuation,
+    controlPoint,
+    aiOnControlPoint,
+    trifecta,
+    appendix,
+  };
+
+  const hits = forbiddenIivEditionHits(flattenDocumentText(doc));
+  if (hits.length) {
+    throw new Error(`IIV Verdict Scorecard must not include: ${hits.join(", ")}`);
   }
 
   return doc;

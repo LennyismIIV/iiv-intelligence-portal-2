@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { AlertOctagon, CheckCircle2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import type { IivVerdict } from "@shared/schema";
 
 interface Props {
   companyId: number;
@@ -14,6 +16,7 @@ interface DecisionSummary {
   dimensionFloors: Array<{ id: number; lensType: string; dimension: string; cappedAt: number }>;
   canWriteInvestVerdict: boolean;
   blockingReasons: string[];
+  iivVerdict?: IivVerdict;
 }
 
 export function VerdictBanner({ companyId }: Props) {
@@ -41,6 +44,11 @@ export function VerdictBanner({ companyId }: Props) {
             No open critical/high findings. All decision gates in good standing.
           </span>
         </div>
+        {data.iivVerdict && (
+          <Badge variant="outline" className="bg-emerald-500/15 text-emerald-200 border-emerald-500/40" data-testid="verdict-banner-current">
+            IIV {data.iivVerdict}
+          </Badge>
+        )}
       </div>
     );
   }
@@ -59,6 +67,11 @@ export function VerdictBanner({ companyId }: Props) {
           ))}
         </ul>
       </div>
+      {data.iivVerdict && (
+        <Badge variant="outline" className="bg-red-500/15 text-red-200 border-red-500/40" data-testid="verdict-banner-current">
+          IIV {data.iivVerdict}
+        </Badge>
+      )}
     </div>
   );
 }

@@ -23,6 +23,7 @@ import { VerdictBanner } from "@/components/VerdictBanner";
 import { StructuredFinancials } from "@/components/StructuredFinancials";
 import { ScorecardFieldsPanel } from "@/components/ScorecardFieldsPanel";
 import { ScorecardEvidencePanel } from "@/components/ScorecardEvidencePanel";
+import { IivVerdictPanel } from "@/components/IivVerdictPanel";
 import { ValuationAssessmentPanel } from "@/components/ValuationAssessmentPanel";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -238,6 +239,7 @@ export default function CompanyDetail() {
 
               <TabsContent value="scorecard" className="space-y-6">
                 <ScorecardFieldsPanel company={company} />
+                <IivVerdictPanel company={company} />
                 <ScorecardEvidencePanel company={company} />
               </TabsContent>
 
