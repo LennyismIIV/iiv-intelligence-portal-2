@@ -22,6 +22,7 @@ import { GatesPanel } from "@/components/GatesPanel";
 import { VerdictBanner } from "@/components/VerdictBanner";
 import { StructuredFinancials } from "@/components/StructuredFinancials";
 import { ScorecardFieldsPanel } from "@/components/ScorecardFieldsPanel";
+import { ScorecardEvidencePanel } from "@/components/ScorecardEvidencePanel";
 import { ValuationAssessmentPanel } from "@/components/ValuationAssessmentPanel";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -117,7 +118,11 @@ export default function CompanyDetail() {
                     URL.revokeObjectURL(url);
                     toast({ title: "Decile export downloaded" });
                   } catch (e: any) {
-                    toast({ title: "Export failed", description: e?.message || "", variant: "destructive" });
+                    toast({
+                      title: "Export blocked",
+                      description: e?.message || "Scorecard QC failed — grade the six material claims first.",
+                      variant: "destructive",
+                    });
                   }
                 }}
               >
@@ -231,8 +236,9 @@ export default function CompanyDetail() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="scorecard">
+              <TabsContent value="scorecard" className="space-y-6">
                 <ScorecardFieldsPanel company={company} />
+                <ScorecardEvidencePanel company={company} />
               </TabsContent>
 
               <TabsContent value="assessment">

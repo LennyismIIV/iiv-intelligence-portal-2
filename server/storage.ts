@@ -18,9 +18,12 @@ import {
   decodeScorecardArrays,
   VALUATION_TAPE_CREATE_SQL,
   VALUATION_ASSESSMENT_CREATE_SQL,
+  SCORECARD_EVIDENCE_CREATE_SQL,
 } from "@shared/schema";
 import { createValuationTapeService, type ValuationTape, type CurrentTapeResult } from "./valuationTapeService";
 import { createValuationAssessmentService, type ValuationAssessment } from "./valuationAssessmentService";
+import { createScorecardEvidenceService } from "./scorecardEvidenceService";
+import type { EvidenceRecord, ScorecardQcResult } from "@shared/scorecardEvidence";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import path from "path";
@@ -164,6 +167,9 @@ sqlite.exec(VALUATION_TAPE_CREATE_SQL);
 // P3.3 — ValuationAssessment linked to Firm + required tape.
 sqlite.exec(VALUATION_ASSESSMENT_CREATE_SQL);
 
+// P3.4 — Evidence grade + confidence attached to Firm / assessment claims.
+sqlite.exec(SCORECARD_EVIDENCE_CREATE_SQL);
+
 // Add Phase 1 CRM columns to existing companies table (idempotent).
 // SQLite doesn't support IF NOT EXISTS on ADD COLUMN, so check first.
 try {
@@ -228,6 +234,7 @@ sqlite.pragma("journal_mode = WAL");
 export const db = drizzle(sqlite);
 export const valuationTapeService = createValuationTapeService(sqlite);
 export const valuationAssessmentService = createValuationAssessmentService(sqlite, valuationTapeService);
+export const scorecardEvidenceService = createScorecardEvidenceService(sqlite);
 
 function decodeCompany<T extends Record<string, unknown> | undefined>(row: T): T {
   if (!row) return row;
@@ -335,6 +342,20 @@ export interface IStorage {
   createValuationAssessment(firmId: number, body: Record<string, unknown>): Promise<ValuationAssessment>;
   updateValuationAssessment(id: number, body: Record<string, unknown>): Promise<ValuationAssessment>;
   deleteValuationAssessment(id: number): Promise<void>;
+
+  // P3.4 Scorecard Evidence
+  listScorecardEvidence(companyId: number): Promise<EvidenceRecord[]>;
+  upsertScorecardEvidence(companyId: number, body: Record<string, unknown>): Promise<EvidenceRecord>;
+  upsertScorecardEvidenceBatch(companyId: number, items: unknown): Promise<EvidenceRecord[]>;
+  getScorecardQc(companyId: number): Promise<ScorecardQcResult>;
+  exportScorecard(companyId: number): Promise<{
+    qc: ScorecardQcResult;
+    evidence: EvidenceRecord[];
+    exportedAt: string;
+    format: "iiv-scorecard-evidence-v1";
+  }>;
+  shipScorecard(companyId: number): Promise<{ shipped: true; shippedAt: string; qc: ScorecardQcResult }>;
+  assertScorecardExportAllowed(companyId: number, pathway: "export" | "ship"): Promise<ScorecardQcResult>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -455,6 +476,7 @@ export class DatabaseStorage implements IStorage {
   async deleteCompany(id: number): Promise<void> {
     db.delete(contacts).where(eq(contacts.companyId, id)).run();
     db.delete(intelligenceEvents).where(eq(intelligenceEvents.companyId, id)).run();
+    sqlite.prepare("DELETE FROM scorecard_evidence WHERE company_id = ?").run(id);
     sqlite.prepare("DELETE FROM valuation_assessments WHERE firm_id = ?").run(id);
     db.delete(companies).where(eq(companies.id, id)).run();
   }
@@ -1015,7 +1037,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteValuationAssessment(id: number): Promise<void> {
+    scorecardEvidenceService.detachAssessment(id);
     return valuationAssessmentService.remove(id);
+  }
+
+  // ===== P3.4 Scorecard Evidence =====
+  async listScorecardEvidence(companyId: number): Promise<EvidenceRecord[]> {
+    return scorecardEvidenceService.list(companyId);
+  }
+
+  async upsertScorecardEvidence(companyId: number, body: Record<string, unknown>): Promise<EvidenceRecord> {
+    return scorecardEvidenceService.upsert(companyId, body);
+  }
+
+  async upsertScorecardEvidenceBatch(companyId: number, items: unknown): Promise<EvidenceRecord[]> {
+    return scorecardEvidenceService.upsertMany(companyId, items);
+  }
+
+  async getScorecardQc(companyId: number): Promise<ScorecardQcResult> {
+    return scorecardEvidenceService.qc(companyId);
+  }
+
+  async exportScorecard(companyId: number) {
+    return scorecardEvidenceService.exportScorecard(companyId);
+  }
+
+  async shipScorecard(companyId: number) {
+    return scorecardEvidenceService.ship(companyId);
+  }
+
+  async assertScorecardExportAllowed(companyId: number, pathway: "export" | "ship"): Promise<ScorecardQcResult> {
+    return scorecardEvidenceService.assertExportAllowed(companyId, pathway);
   }
 }
 
