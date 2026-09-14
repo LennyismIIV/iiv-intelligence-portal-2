@@ -16,7 +16,11 @@ import {
   FINDING_TERMINAL_STATUSES,
   encodeScorecardArrays,
   decodeScorecardArrays,
+  VALUATION_TAPE_CREATE_SQL,
+  VALUATION_ASSESSMENT_CREATE_SQL,
 } from "@shared/schema";
+import { createValuationTapeService, type ValuationTape, type CurrentTapeResult } from "./valuationTapeService";
+import { createValuationAssessmentService, type ValuationAssessment } from "./valuationAssessmentService";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import path from "path";
@@ -154,6 +158,12 @@ sqlite.exec(`
     ON findings(status, severity);
 `);
 
+// P3.2 — ValuationTape (dated comps tape). Independent of companies SoR.
+sqlite.exec(VALUATION_TAPE_CREATE_SQL);
+
+// P3.3 — ValuationAssessment linked to Firm + required tape.
+sqlite.exec(VALUATION_ASSESSMENT_CREATE_SQL);
+
 // Add Phase 1 CRM columns to existing companies table (idempotent).
 // SQLite doesn't support IF NOT EXISTS on ADD COLUMN, so check first.
 try {
@@ -216,6 +226,8 @@ try {
 sqlite.pragma("journal_mode = WAL");
 
 export const db = drizzle(sqlite);
+export const valuationTapeService = createValuationTapeService(sqlite);
+export const valuationAssessmentService = createValuationAssessmentService(sqlite, valuationTapeService);
 
 function decodeCompany<T extends Record<string, unknown> | undefined>(row: T): T {
   if (!row) return row;
@@ -307,6 +319,22 @@ export interface IStorage {
     canWriteInvestVerdict: boolean;
     blockingReasons: string[];
   }>;
+
+  // P3.2 ValuationTape
+  listValuationTapes(status?: string): Promise<ValuationTape[]>;
+  getValuationTape(tapeId: string): Promise<ValuationTape | undefined>;
+  createValuationTapeDraft(body: Record<string, unknown>): Promise<ValuationTape>;
+  updateValuationTapeDraft(tapeId: string, body: Record<string, unknown>): Promise<ValuationTape>;
+  approveValuationTape(tapeId: string, body: Record<string, unknown>): Promise<ValuationTape>;
+  getCurrentApprovedTape(opts?: { tapeId?: string; override?: boolean; now?: string }): Promise<CurrentTapeResult>;
+
+  // P3.3 ValuationAssessment
+  listValuationAssessments(firmId: number): Promise<ValuationAssessment[]>;
+  getValuationAssessment(id: number): Promise<ValuationAssessment | undefined>;
+  getLatestValuationAssessment(firmId: number): Promise<ValuationAssessment | null>;
+  createValuationAssessment(firmId: number, body: Record<string, unknown>): Promise<ValuationAssessment>;
+  updateValuationAssessment(id: number, body: Record<string, unknown>): Promise<ValuationAssessment>;
+  deleteValuationAssessment(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -427,6 +455,7 @@ export class DatabaseStorage implements IStorage {
   async deleteCompany(id: number): Promise<void> {
     db.delete(contacts).where(eq(contacts.companyId, id)).run();
     db.delete(intelligenceEvents).where(eq(intelligenceEvents.companyId, id)).run();
+    sqlite.prepare("DELETE FROM valuation_assessments WHERE firm_id = ?").run(id);
     db.delete(companies).where(eq(companies.id, id)).run();
   }
 
@@ -937,6 +966,56 @@ export class DatabaseStorage implements IStorage {
       .map(r => r.leadSource)
       .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
       .sort((a, b) => a.localeCompare(b));
+  }
+
+  // ===== P3.2 ValuationTape =====
+  async listValuationTapes(status?: string): Promise<ValuationTape[]> {
+    return valuationTapeService.list(status);
+  }
+
+  async getValuationTape(tapeId: string): Promise<ValuationTape | undefined> {
+    return valuationTapeService.get(tapeId);
+  }
+
+  async createValuationTapeDraft(body: Record<string, unknown>): Promise<ValuationTape> {
+    return valuationTapeService.createDraft(body);
+  }
+
+  async updateValuationTapeDraft(tapeId: string, body: Record<string, unknown>): Promise<ValuationTape> {
+    return valuationTapeService.updateDraft(tapeId, body);
+  }
+
+  async approveValuationTape(tapeId: string, body: Record<string, unknown>): Promise<ValuationTape> {
+    return valuationTapeService.approve(tapeId, body);
+  }
+
+  async getCurrentApprovedTape(opts?: { tapeId?: string; override?: boolean; now?: string }): Promise<CurrentTapeResult> {
+    return valuationTapeService.getCurrentApprovedTape(opts);
+  }
+
+  // ===== P3.3 ValuationAssessment =====
+  async listValuationAssessments(firmId: number): Promise<ValuationAssessment[]> {
+    return valuationAssessmentService.list(firmId);
+  }
+
+  async getValuationAssessment(id: number): Promise<ValuationAssessment | undefined> {
+    return valuationAssessmentService.get(id);
+  }
+
+  async getLatestValuationAssessment(firmId: number): Promise<ValuationAssessment | null> {
+    return valuationAssessmentService.getLatest(firmId);
+  }
+
+  async createValuationAssessment(firmId: number, body: Record<string, unknown>): Promise<ValuationAssessment> {
+    return valuationAssessmentService.create(firmId, body);
+  }
+
+  async updateValuationAssessment(id: number, body: Record<string, unknown>): Promise<ValuationAssessment> {
+    return valuationAssessmentService.update(id, body);
+  }
+
+  async deleteValuationAssessment(id: number): Promise<void> {
+    return valuationAssessmentService.remove(id);
   }
 }
 

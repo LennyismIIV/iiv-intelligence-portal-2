@@ -7,6 +7,8 @@ import {
   insertGateSchema, insertDimensionFloorSchema, insertFindingSchema,
   GATE_IDS, GATE_STATUSES, FINDING_STATUSES, FINDING_SEVERITIES,
   applyScorecardValidation,
+  ValuationTapeError,
+  ValuationAssessmentError,
 } from "@shared/schema";
 import { readFileSync } from "fs";
 import { resolve } from "path";
@@ -903,6 +905,167 @@ export async function registerRoutes(
       await storage.deleteFinding(id);
       res.json({ ok: true });
     } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ============================================================
+  // P3.2 ValuationTape — dated comps tape (not Content Studio–owned)
+  // GET /current must be registered before /:tapeId
+  // ============================================================
+  function sendTapeError(err: unknown, res: import("express").Response): boolean {
+    if (err instanceof ValuationTapeError) {
+      res.status(err.statusCode).json({ message: err.message, ...err.extras });
+      return true;
+    }
+    return false;
+  }
+
+  app.get("/api/valuation-tapes", async (req, res) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const tapes = await storage.listValuationTapes(status);
+      res.json(tapes);
+    } catch (err: any) {
+      if (sendTapeError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/valuation-tapes/current", async (req, res) => {
+    try {
+      const tapeId = typeof req.query.tapeId === "string" ? req.query.tapeId : undefined;
+      const overrideRaw = req.query.override;
+      const override = overrideRaw === "1" || overrideRaw === "true";
+      const result = await storage.getCurrentApprovedTape({ tapeId, override });
+      res.json(result);
+    } catch (err: any) {
+      if (sendTapeError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/valuation-tapes/:tapeId", async (req, res) => {
+    try {
+      const tape = await storage.getValuationTape(req.params.tapeId);
+      if (!tape) return res.status(404).json({ message: "Tape not found" });
+      res.json(tape);
+    } catch (err: any) {
+      if (sendTapeError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/valuation-tapes", async (req, res) => {
+    try {
+      const tape = await storage.createValuationTapeDraft(req.body || {});
+      res.status(201).json(tape);
+    } catch (err: any) {
+      if (sendTapeError(err, res)) return;
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/valuation-tapes/:tapeId", async (req, res) => {
+    try {
+      const tape = await storage.updateValuationTapeDraft(req.params.tapeId, req.body || {});
+      res.json(tape);
+    } catch (err: any) {
+      if (sendTapeError(err, res)) return;
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/valuation-tapes/:tapeId/approve", async (req, res) => {
+    try {
+      const tape = await storage.approveValuationTape(req.params.tapeId, req.body || {});
+      res.json(tape);
+    } catch (err: any) {
+      if (sendTapeError(err, res)) return;
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // ============================================================
+  // P3.3 ValuationAssessment — Firm + required approved tape
+  // ============================================================
+  function sendAssessmentError(err: unknown, res: import("express").Response): boolean {
+    if (err instanceof ValuationAssessmentError) {
+      res.status(err.statusCode).json({ message: err.message, ...err.extras });
+      return true;
+    }
+    return false;
+  }
+
+  app.get("/api/companies/:id/assessments", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (req.query.latest === "1" || req.query.latest === "true") {
+        const latest = await storage.getLatestValuationAssessment(id);
+        return res.json(latest);
+      }
+      const rows = await storage.listValuationAssessments(id);
+      res.json(rows);
+    } catch (err: any) {
+      if (sendAssessmentError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/companies/:id/assessments/latest", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const latest = await storage.getLatestValuationAssessment(id);
+      res.json(latest);
+    } catch (err: any) {
+      if (sendAssessmentError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/companies/:id/assessments", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const saved = await storage.createValuationAssessment(id, req.body || {});
+      res.status(201).json(saved);
+    } catch (err: any) {
+      if (sendAssessmentError(err, res)) return;
+      if (sendTapeError(err, res)) return;
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/assessments/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const row = await storage.getValuationAssessment(id);
+      if (!row) return res.status(404).json({ message: "Assessment not found" });
+      res.json(row);
+    } catch (err: any) {
+      if (sendAssessmentError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/assessments/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updated = await storage.updateValuationAssessment(id, req.body || {});
+      res.json(updated);
+    } catch (err: any) {
+      if (sendAssessmentError(err, res)) return;
+      if (sendTapeError(err, res)) return;
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/assessments/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteValuationAssessment(id);
+      res.json({ ok: true });
+    } catch (err: any) {
+      if (sendAssessmentError(err, res)) return;
       res.status(500).json({ message: err.message });
     }
   });

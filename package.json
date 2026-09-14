@@ -11,7 +11,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "test": "tsx --test server/scorecard-fields.test.ts",
+    "test": "tsx --test server/scorecard-fields.test.ts server/valuation-tape.test.ts server/valuation-assessment.test.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

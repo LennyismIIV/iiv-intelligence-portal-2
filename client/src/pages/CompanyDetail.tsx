@@ -22,6 +22,7 @@ import { GatesPanel } from "@/components/GatesPanel";
 import { VerdictBanner } from "@/components/VerdictBanner";
 import { StructuredFinancials } from "@/components/StructuredFinancials";
 import { ScorecardFieldsPanel } from "@/components/ScorecardFieldsPanel";
+import { ValuationAssessmentPanel } from "@/components/ValuationAssessmentPanel";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -149,6 +150,7 @@ export default function CompanyDetail() {
                 <TabsTrigger value="diligence" data-testid="tab-diligence">Diligence</TabsTrigger>
                 <TabsTrigger value="decision" data-testid="tab-decision">Decision Layer</TabsTrigger>
                 <TabsTrigger value="scorecard" data-testid="tab-scorecard">Scorecard</TabsTrigger>
+                <TabsTrigger value="assessment" data-testid="tab-assessment">Assessment</TabsTrigger>
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
 
@@ -231,6 +233,10 @@ export default function CompanyDetail() {
 
               <TabsContent value="scorecard">
                 <ScorecardFieldsPanel company={company} />
+              </TabsContent>
+
+              <TabsContent value="assessment">
+                <ValuationAssessmentPanel company={company} />
               </TabsContent>
 
               <TabsContent value="notes">

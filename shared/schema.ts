@@ -413,3 +413,90 @@ export const FINDING_TERMINAL_STATUSES: FindingStatus[] = [
   "rejected",
 ];
 
+// ============================================================
+// P3.2 ValuationTape (dated comps tape — not Content Studio–owned)
+// ============================================================
+export {
+  TAPE_STATUSES,
+  TAPE_GRACE_DAYS_MAX,
+  DEFAULT_DRAFTED_BY,
+  VALUATION_TAPE_CREATE_SQL,
+  ValuationTapeError,
+  computeExpiresAt,
+  parseBands,
+  encodeBands,
+  assertHumanApprover,
+  createDraftTapeSchema,
+  updateDraftTapeSchema,
+  approveTapeSchema,
+} from "./valuationTape";
+export type { TapeStatus, TapeBand } from "./valuationTape";
+
+export const valuationTapes = sqliteTable("valuation_tapes", {
+  tapeId: text("tape_id").primaryKey(),
+  asOf: text("as_of").notNull(),
+  expiresAt: text("expires_at"),
+  status: text("status").notNull().default("draft"),
+  approverId: text("approver_id"),
+  supersededBy: text("superseded_by"),
+  bands: text("bands"),
+  sourceNotes: text("source_notes"),
+  draftedBy: text("drafted_by"),
+  versionedBy: text("versioned_by"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type ValuationTapeRow = typeof valuationTapes.$inferSelect;
+
+// ============================================================
+// P3.3 ValuationAssessment (Firm + required approved tape)
+// ============================================================
+export {
+  HARD_RULE_IDS,
+  HARD_RULE_LABELS,
+  DOCTRINE_FLAGS,
+  DOCTRINE_FLAG_LABELS,
+  FINANCIALS_CONFIDENCE,
+  VALUATION_ASSESSMENT_CREATE_SQL,
+  ValuationAssessmentError,
+  parseHardRulesFired,
+  encodeHardRulesFired,
+  parseDoctrineFlags,
+  parseFinancialsRecord,
+  evaluateHardRules,
+  recommendBandFromInputs,
+} from "./valuationAssessment";
+export type {
+  HardRuleId,
+  DoctrineFlag,
+  FinancialsConfidence,
+  FinancialsRecord,
+  HardRulesFired,
+} from "./valuationAssessment";
+
+export const valuationAssessments = sqliteTable("valuation_assessments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  firmId: integer("firm_id").notNull().references(() => companies.id),
+  evaluatorId: text("evaluator_id").notNull(),
+  mapAX: real("map_a_x"),
+  mapAY: real("map_a_y"),
+  valuationCategory: text("valuation_category"),
+  doctrineFlags: text("doctrine_flags"),
+  recommendedBand: text("recommended_band"),
+  finalBand: text("final_band"),
+  overrideReason: text("override_reason"),
+  hardRulesFired: text("hard_rules_fired").notNull(),
+  tapeId: text("tape_id").notNull(),
+  tapeAsOf: text("tape_as_of").notNull(),
+  bandRanges: text("band_ranges").notNull(),
+  conviction: real("conviction"),
+  narrative: text("narrative"),
+  scoredAt: text("scored_at").notNull(),
+  financialsJson: text("financials_json"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type ValuationAssessmentRow = typeof valuationAssessments.$inferSelect;
+

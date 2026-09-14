@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { IIVLogoFull, IIVLogo } from "./IIVLogo";
-import { LayoutDashboard, Building2, GitCompareArrows, Search, Moon, Sun, PanelLeftClose, PanelLeft, Trophy, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, Building2, GitCompareArrows, Search, Moon, Sun, PanelLeftClose, PanelLeft, Trophy, AlertTriangle, LineChart } from "lucide-react";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -10,6 +10,7 @@ const navItems = [
   { path: "/companies", label: "Companies", icon: Building2 },
   { path: "/evaluations", label: "Evaluations", icon: Trophy },
   { path: "/findings", label: "Findings", icon: AlertTriangle },
+  { path: "/valuation-tape", label: "Valuation Tape", icon: LineChart },
   { path: "/compare", label: "Compare", icon: GitCompareArrows },
   { path: "/search", label: "Search", icon: Search },
 ];
