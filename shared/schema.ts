@@ -2,6 +2,39 @@ import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
+import { scorecardFieldsSchema } from "./scorecardFields";
+
+export {
+  STRATEGIC_POSTURES,
+  STRATEGIC_POSTURE_LABELS,
+  VALUATION_CATEGORIES,
+  VALUATION_CATEGORY_LABELS,
+  HUMAN_DATA_SUPPLY_CATEGORIES,
+  HUMAN_DATA_SUPPLY_LABELS,
+  PLATFORM_STAGES,
+  PLATFORM_STAGE_LABELS,
+  VC_CONTROL_LAYERS,
+  BRAND_TAGS,
+  BRAND_TAG_LABELS,
+  SCORECARD_FIELD_KEYS,
+  scorecardFieldsSchema,
+  applyScorecardValidation,
+  normalizeScorecardAliases,
+  encodeScorecardArrays,
+  decodeScorecardArrays,
+  parseJsonStringArray,
+  companyHasBrandTag,
+  isGreenbookVisible,
+} from "./scorecardFields";
+export type {
+  StrategicPosture,
+  ValuationCategory,
+  HumanDataSupplyCategory,
+  PlatformStage,
+  VcControlLayer,
+  BrandTag,
+  ScorecardFields,
+} from "./scorecardFields";
 
 export const companies = sqliteTable("companies", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -50,6 +83,15 @@ export const companies = sqliteTable("companies", {
   fcfMarginPct: real("fcf_margin_pct"),                 // Free cash flow margin (e.g. 12 = 12%)
   fundingStage: text("funding_stage"),                  // 'seed' | 'series_a' | 'series_b' | 'series_c' | 'growth' | 'pe_owned' | 'public'
   financialsAsOf: text("financials_as_of"),             // ISO date the numbers reflect (judge-entered)
+  // P3.1 — Scorecard-minimal Firm fields (same companies SoR; no parallel Firm table).
+  mapAX: real("map_a_x"),                               // Map A X coordinate, 0–10 inclusive
+  mapAY: real("map_a_y"),                               // Map A Y coordinate, 0–10 inclusive
+  strategicPosture: text("strategic_posture"),          // orchestrator | trust_builder | decision_partner
+  valuationCategory: text("valuation_category"),        // AI-First | Legacy_SaaS_AI | HITL | Data_Provider | Pure_Services
+  humanDataSupplyCategory: text("human_data_supply_category"),
+  platformStage: text("platform_stage"),                // project_shop | productized_research | data_insight_platform | di_infrastructure
+  vcControlLayers: text("vc_control_layers"),           // JSON array subset of VC1…VC5
+  brandTags: text("brand_tags"),                        // JSON array: gen2_client | iiv_pipeline | greenbook_visible
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -109,7 +151,15 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
-});
+  mapAX: true,
+  mapAY: true,
+  strategicPosture: true,
+  valuationCategory: true,
+  humanDataSupplyCategory: true,
+  platformStage: true,
+  vcControlLayers: true,
+  brandTags: true,
+}).extend(scorecardFieldsSchema.shape);
 
 export const insertContactSchema = createInsertSchema(contacts).omit({
   id: true,
