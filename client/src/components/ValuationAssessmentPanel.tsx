@@ -99,6 +99,7 @@ function bandLabel(bandId: string) {
 }
 
 function asCoord(value: unknown): number {
+  if (value == null || value === "") return 5;
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : 5;
 }
