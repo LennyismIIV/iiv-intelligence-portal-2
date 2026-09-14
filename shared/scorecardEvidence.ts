@@ -370,6 +370,8 @@ export interface ScorecardQcResult {
   failClosed: true;
   claims: QcClaimStatus[];
   missingClaimKeys: MaterialClaimKey[];
+  prd9: Prd9Blocker[];
+  latestShip: ScorecardShipRecord | null;
 }
 
 export function evaluateScorecardQc(
@@ -400,6 +402,8 @@ export function evaluateScorecardQc(
     failClosed: true,
     claims,
     missingClaimKeys,
+    prd9: [],
+    latestShip: null,
   };
 }
 
@@ -409,4 +413,175 @@ export function qcBlockedError(qc: ScorecardQcResult, pathway: "export" | "ship"
     409,
     { qc, status: "failed" },
   );
+}
+
+/**
+ * P3.8 — hour log on the ship event.
+ *
+ * Choice (documented): require leonard_hours / reviewer_hours > 0 on every ship.
+ * D3 Leonard-only is ops policy on tape approval (human approver_id), not a
+ * code-enforced reviewer roster, so the first-3 Scorecards soft-required
+ * warning is not used.
+ */
+export const SCORECARD_SHIP_CREATE_SQL = `
+  CREATE TABLE IF NOT EXISTS scorecard_ships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    shipped_at TEXT NOT NULL,
+    shipped_by TEXT,
+    leonard_hours REAL NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS scorecard_ships_company_idx
+    ON scorecard_ships(company_id, shipped_at DESC);
+`;
+
+export const PRD9_BLOCKER_IDS = [
+  "tape_current",
+  "evidence_grades",
+  "hard_rules_fired",
+  "tape_as_of",
+] as const;
+export type Prd9BlockerId = (typeof PRD9_BLOCKER_IDS)[number];
+
+export interface Prd9Blocker {
+  id: Prd9BlockerId;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface ScorecardShipRecord {
+  id: number;
+  companyId: number;
+  shippedAt: string;
+  shippedBy: string | null;
+  leonardHours: number;
+}
+
+export interface ScorecardShipResult extends ScorecardShipRecord {
+  shipped: true;
+  reviewerHours: number;
+  qc: ScorecardQcResult;
+}
+
+function pickShipField(body: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (body[key] !== undefined) return body[key];
+  }
+  return undefined;
+}
+
+export function parseLeonardHours(body: Record<string, unknown>): number {
+  const raw = pickShipField(
+    body,
+    "leonardHours",
+    "leonard_hours",
+    "reviewerHours",
+    "reviewer_hours",
+  );
+  if (raw == null || raw === "") {
+    throw new ScorecardEvidenceError(
+      "Ship blocked: leonard_hours is required and must be greater than 0.",
+      400,
+    );
+  }
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ScorecardEvidenceError(
+      "Ship blocked: leonard_hours must be a number greater than 0.",
+      400,
+    );
+  }
+  return n;
+}
+
+export function parseShippedBy(body: Record<string, unknown>): string | null {
+  const raw = pickShipField(body, "shippedBy", "shipped_by");
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") {
+    throw new ScorecardEvidenceError("shipped_by must be a string", 400);
+  }
+  return raw.trim() || null;
+}
+
+export function hoursLogged(hours: number | null | undefined): boolean {
+  return typeof hours === "number" && Number.isFinite(hours) && hours > 0;
+}
+
+export function evaluatePrd9Blockers(input: {
+  tape: { status: string; asOf?: string | null } | null | undefined;
+  assessment: { hardRulesFired?: unknown; tapeAsOf?: string | null } | null | undefined;
+  evidencePassed: boolean;
+  missingClaimCount: number;
+}): Prd9Blocker[] {
+  const tape = input.tape ?? null;
+  let tapeDetail: string;
+  let tapePassed = false;
+  if (!tape) {
+    tapeDetail = "Tape blank — no approved ValuationTape";
+  } else if (tape.status === "expired" || tape.status === "superseded") {
+    tapeDetail = `Tape stale — status is ${tape.status}`;
+  } else if (tape.status === "draft") {
+    tapeDetail = "Tape blank — draft only, not approved";
+  } else if (tape.status === "approved") {
+    tapePassed = true;
+    tapeDetail = tape.asOf ? `Approved tape as-of ${tape.asOf}` : "Approved tape is current";
+  } else {
+    tapeDetail = `Tape blank — unexpected status ${tape.status}`;
+  }
+
+  const hardRaw = input.assessment?.hardRulesFired;
+  const hardPresent =
+    hardRaw === "none"
+    || (Array.isArray(hardRaw) && hardRaw.length >= 0 && hardRaw !== undefined && hardRaw !== null)
+    || (typeof hardRaw === "string" && hardRaw.trim().length > 0)
+    || (hardRaw != null && typeof hardRaw === "object" && !Array.isArray(hardRaw) && (
+      (hardRaw as { none?: unknown }).none === true
+      || Array.isArray((hardRaw as { ids?: unknown }).ids)
+    ));
+  const tapeAsOf = input.assessment?.tapeAsOf;
+  const tapeAsOfPresent = typeof tapeAsOf === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tapeAsOf);
+
+  return [
+    {
+      id: "tape_current",
+      label: "Valuation tape current",
+      passed: tapePassed,
+      detail: tapeDetail,
+    },
+    {
+      id: "evidence_grades",
+      label: "Evidence grade + confidence",
+      passed: input.evidencePassed,
+      detail: input.evidencePassed
+        ? "All six material claims have grade and confidence"
+        : `${input.missingClaimCount} claim${input.missingClaimCount === 1 ? "" : "s"} missing grade or confidence`,
+    },
+    {
+      id: "hard_rules_fired",
+      label: "hard_rules_fired recorded",
+      passed: !!hardPresent,
+      detail: hardPresent
+        ? "hard_rules_fired is present (array or explicit none)"
+        : "hard_rules_fired omitted — no ValuationAssessment or field missing",
+    },
+    {
+      id: "tape_as_of",
+      label: "tape_as_of recorded",
+      passed: tapeAsOfPresent,
+      detail: tapeAsOfPresent
+        ? `tape_as_of ${tapeAsOf}`
+        : "tape_as_of missing — no ValuationAssessment snapshot",
+    },
+  ];
+}
+
+export function emptyPrd9Blockers(): Prd9Blocker[] {
+  return evaluatePrd9Blockers({
+    tape: null,
+    assessment: null,
+    evidencePassed: false,
+    missingClaimCount: MATERIAL_CLAIM_KEYS.length,
+  });
 }

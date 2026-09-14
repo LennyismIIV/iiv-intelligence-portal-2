@@ -19,6 +19,7 @@ import {
   VALUATION_TAPE_CREATE_SQL,
   VALUATION_ASSESSMENT_CREATE_SQL,
   SCORECARD_EVIDENCE_CREATE_SQL,
+  SCORECARD_SHIP_CREATE_SQL,
   parseIivVerdict,
   assertIivVerdictWritable,
   collectIivBlockers,
@@ -37,7 +38,7 @@ import {
   type ScorecardExportFormat,
   type ScorecardExportJson,
 } from "./scorecardExportService";
-import type { EvidenceRecord, ScorecardQcResult } from "@shared/scorecardEvidence";
+import type { EvidenceRecord, ScorecardQcResult, ScorecardShipResult } from "@shared/scorecardEvidence";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import path from "path";
@@ -183,6 +184,9 @@ sqlite.exec(VALUATION_ASSESSMENT_CREATE_SQL);
 
 // P3.4 — Evidence grade + confidence attached to Firm / assessment claims.
 sqlite.exec(SCORECARD_EVIDENCE_CREATE_SQL);
+
+// P3.8 — persist ship metadata + Leonard hour log.
+sqlite.exec(SCORECARD_SHIP_CREATE_SQL);
 
 // Add Phase 1 CRM columns to existing companies table (idempotent).
 // SQLite doesn't support IF NOT EXISTS on ADD COLUMN, so check first.
@@ -382,7 +386,7 @@ export interface IStorage {
     exportedAt: string;
     format: "iiv-scorecard-evidence-v1";
   }>;
-  shipScorecard(companyId: number): Promise<{ shipped: true; shippedAt: string; qc: ScorecardQcResult }>;
+  shipScorecard(companyId: number, body?: Record<string, unknown>): Promise<ScorecardShipResult>;
   assertScorecardExportAllowed(companyId: number, pathway: "export" | "ship"): Promise<ScorecardQcResult>;
   exportGen2Scorecard(
     companyId: number,
@@ -1157,8 +1161,8 @@ export class DatabaseStorage implements IStorage {
     return scorecardEvidenceService.exportScorecard(companyId);
   }
 
-  async shipScorecard(companyId: number) {
-    return scorecardEvidenceService.ship(companyId);
+  async shipScorecard(companyId: number, body: Record<string, unknown> = {}) {
+    return scorecardEvidenceService.ship(companyId, body);
   }
 
   async assertScorecardExportAllowed(companyId: number, pathway: "export" | "ship"): Promise<ScorecardQcResult> {

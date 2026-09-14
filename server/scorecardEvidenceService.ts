@@ -1,17 +1,24 @@
 import type Database from "better-sqlite3";
 import {
   MATERIAL_CLAIM_KEYS,
+  SCORECARD_SHIP_CREATE_SQL,
   ScorecardEvidenceError,
+  evaluatePrd9Blockers,
   evaluateScorecardQc,
   isAssessmentClaim,
   parseEvidenceWrite,
+  parseLeonardHours,
+  parseShippedBy,
   qcBlockedError,
   withEvidenceLabels,
   type EvidenceRecord,
   type MaterialClaimKey,
   type ParsedEvidenceWrite,
   type ScorecardQcResult,
+  type ScorecardShipRecord,
+  type ScorecardShipResult,
 } from "@shared/scorecardEvidence";
+import { isPastExpiry, todayUtcDate } from "@shared/valuationTape";
 
 interface EvidenceRow {
   id: number;
@@ -51,7 +58,54 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+interface TapeQcRow {
+  status: string;
+  as_of: string;
+  expires_at: string | null;
+}
+
+interface AssessmentQcRow {
+  hard_rules_fired: string | null;
+  tape_as_of: string | null;
+}
+
+interface ShipRow {
+  id: number;
+  company_id: number;
+  shipped_at: string;
+  shipped_by: string | null;
+  leonard_hours: number;
+}
+
+function tableExists(sqlite: Database.Database, name: string): boolean {
+  const row = sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(name) as { name: string } | undefined;
+  return !!row;
+}
+
+function decodeHardRulesForQc(stored: string | null | undefined): unknown {
+  if (stored == null || stored === "") return undefined;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return stored;
+  }
+}
+
+function rowToShip(row: ShipRow): ScorecardShipRecord {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    shippedAt: row.shipped_at,
+    shippedBy: row.shipped_by,
+    leonardHours: row.leonard_hours,
+  };
+}
+
 export function createScorecardEvidenceService(sqlite: Database.Database) {
+  sqlite.exec(SCORECARD_SHIP_CREATE_SQL);
+
   const firmExists = sqlite.prepare("SELECT id FROM companies WHERE id = ?");
   const assessmentExists = sqlite.prepare(
     "SELECT id, firm_id FROM valuation_assessments WHERE id = ?",
@@ -198,12 +252,74 @@ export function createScorecardEvidenceService(sqlite: Database.Database) {
     return tx(parsed);
   }
 
+  function loadTapeForQc(): { status: string; asOf: string } | null {
+    if (!tableExists(sqlite, "valuation_tapes")) return null;
+    const approved = sqlite.prepare(`
+      SELECT status, as_of, expires_at FROM valuation_tapes
+      WHERE status = 'approved'
+      ORDER BY as_of DESC, tape_id DESC
+      LIMIT 1
+    `).get() as TapeQcRow | undefined;
+    if (approved) {
+      const stale = isPastExpiry(approved.expires_at, todayUtcDate());
+      return {
+        status: stale ? "expired" : approved.status,
+        asOf: approved.as_of,
+      };
+    }
+    const stale = sqlite.prepare(`
+      SELECT status, as_of, expires_at FROM valuation_tapes
+      WHERE status IN ('expired', 'superseded')
+      ORDER BY as_of DESC, tape_id DESC
+      LIMIT 1
+    `).get() as TapeQcRow | undefined;
+    return stale ? { status: stale.status, asOf: stale.as_of } : null;
+  }
+
+  function loadAssessmentForQc(companyId: number): {
+    hardRulesFired?: unknown;
+    tapeAsOf?: string | null;
+  } | null {
+    if (!tableExists(sqlite, "valuation_assessments")) return null;
+    const row = sqlite.prepare(`
+      SELECT hard_rules_fired, tape_as_of FROM valuation_assessments
+      WHERE firm_id = ?
+      ORDER BY scored_at DESC, id DESC
+      LIMIT 1
+    `).get(companyId) as AssessmentQcRow | undefined;
+    if (!row) return null;
+    return {
+      hardRulesFired: decodeHardRulesForQc(row.hard_rules_fired),
+      tapeAsOf: row.tape_as_of,
+    };
+  }
+
+  function latestShip(companyId: number): ScorecardShipRecord | null {
+    const row = sqlite.prepare(`
+      SELECT * FROM scorecard_ships
+      WHERE company_id = ?
+      ORDER BY shipped_at DESC, id DESC
+      LIMIT 1
+    `).get(companyId) as ShipRow | undefined;
+    return row ? rowToShip(row) : null;
+  }
+
   function qc(companyId: number): ScorecardQcResult {
     requireFirm(companyId);
     const rows = list(companyId);
     const byClaim: Partial<Record<MaterialClaimKey, EvidenceRecord>> = {};
     for (const row of rows) byClaim[row.claimKey] = row;
-    return evaluateScorecardQc(byClaim);
+    const result = evaluateScorecardQc(byClaim);
+    return {
+      ...result,
+      prd9: evaluatePrd9Blockers({
+        tape: loadTapeForQc(),
+        assessment: loadAssessmentForQc(companyId),
+        evidencePassed: result.passed,
+        missingClaimCount: result.missingClaimKeys.length,
+      }),
+      latestShip: latestShip(companyId),
+    };
   }
 
   function assertExportAllowed(companyId: number, pathway: "export" | "ship"): ScorecardQcResult {
@@ -245,15 +361,26 @@ export function createScorecardEvidenceService(sqlite: Database.Database) {
     };
   }
 
-  function ship(companyId: number): {
-    shipped: true;
-    shippedAt: string;
-    qc: ScorecardQcResult;
-  } {
+  function ship(companyId: number, body: Record<string, unknown> = {}): ScorecardShipResult {
     const result = assertExportAllowed(companyId, "ship");
+    const leonardHours = parseLeonardHours(body);
+    const shippedBy = parseShippedBy(body);
+    const shippedAt = nowIso();
+    const inserted = sqlite.prepare(`
+      INSERT INTO scorecard_ships (company_id, shipped_at, shipped_by, leonard_hours)
+      VALUES (?, ?, ?, ?)
+    `).run(companyId, shippedAt, shippedBy, leonardHours);
+    const record = rowToShip({
+      id: Number(inserted.lastInsertRowid),
+      company_id: companyId,
+      shipped_at: shippedAt,
+      shipped_by: shippedBy,
+      leonard_hours: leonardHours,
+    });
     return {
+      ...record,
       shipped: true,
-      shippedAt: nowIso(),
+      reviewerHours: leonardHours,
       qc: result,
     };
   }
@@ -267,6 +394,7 @@ export function createScorecardEvidenceService(sqlite: Database.Database) {
     assertExportAllowed,
     exportScorecard,
     ship,
+    latestShip,
     remove,
     removeForCompany,
     detachAssessment,

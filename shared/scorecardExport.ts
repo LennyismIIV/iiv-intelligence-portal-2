@@ -18,6 +18,7 @@ import {
   type EvidenceRecord,
   type MaterialClaimKey,
   type ScorecardQcResult,
+  emptyPrd9Blockers,
 } from "./scorecardEvidence";
 import {
   STRATEGIC_POSTURE_LABELS,
@@ -954,5 +955,7 @@ export function emptyQc(): ScorecardQcResult {
       missing: ["grade", "confidence"],
     })),
     missingClaimKeys: [...MATERIAL_CLAIM_KEYS],
+    prd9: emptyPrd9Blockers(),
+    latestShip: null,
   };
 }
