@@ -23,6 +23,12 @@ import {
 import { createValuationTapeService, type ValuationTape, type CurrentTapeResult } from "./valuationTapeService";
 import { createValuationAssessmentService, type ValuationAssessment } from "./valuationAssessmentService";
 import { createScorecardEvidenceService } from "./scorecardEvidenceService";
+import {
+  createSqliteScorecardExportService,
+  type ScorecardBinaryExport,
+  type ScorecardExportFormat,
+  type ScorecardExportJson,
+} from "./scorecardExportService";
 import type { EvidenceRecord, ScorecardQcResult } from "@shared/scorecardEvidence";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -235,6 +241,11 @@ export const db = drizzle(sqlite);
 export const valuationTapeService = createValuationTapeService(sqlite);
 export const valuationAssessmentService = createValuationAssessmentService(sqlite, valuationTapeService);
 export const scorecardEvidenceService = createScorecardEvidenceService(sqlite);
+export const scorecardExportService = createSqliteScorecardExportService(sqlite, {
+  evidence: scorecardEvidenceService,
+  getLatestAssessment: (firmId) => valuationAssessmentService.getLatest(firmId),
+  getCurrentApprovedTape: () => valuationTapeService.getCurrentApprovedTape(),
+});
 
 function decodeCompany<T extends Record<string, unknown> | undefined>(row: T): T {
   if (!row) return row;
@@ -356,6 +367,10 @@ export interface IStorage {
   }>;
   shipScorecard(companyId: number): Promise<{ shipped: true; shippedAt: string; qc: ScorecardQcResult }>;
   assertScorecardExportAllowed(companyId: number, pathway: "export" | "ship"): Promise<ScorecardQcResult>;
+  exportGen2Scorecard(
+    companyId: number,
+    opts?: { format?: ScorecardExportFormat; draft?: boolean },
+  ): Promise<ScorecardExportJson | ScorecardBinaryExport>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1068,6 +1083,13 @@ export class DatabaseStorage implements IStorage {
 
   async assertScorecardExportAllowed(companyId: number, pathway: "export" | "ship"): Promise<ScorecardQcResult> {
     return scorecardEvidenceService.assertExportAllowed(companyId, pathway);
+  }
+
+  async exportGen2Scorecard(
+    companyId: number,
+    opts: { format?: ScorecardExportFormat; draft?: boolean } = {},
+  ) {
+    return scorecardExportService.exportScorecard(companyId, opts);
   }
 }
 

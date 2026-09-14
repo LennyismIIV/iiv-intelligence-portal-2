@@ -556,3 +556,33 @@ export const scorecardEvidence = sqliteTable("scorecard_evidence", {
 
 export type ScorecardEvidenceRow = typeof scorecardEvidence.$inferSelect;
 
+// ============================================================
+// P3.5 Gen2 CEO Scorecard export (DOCX primary + locked-send PDF)
+// ============================================================
+export {
+  SCORECARD_BRAND,
+  SCORECARD_EDITION,
+  SCORECARD_FORMAT,
+  EVIDENCE_FORMAT,
+  INSTRUMENT_A_NAME,
+  AI_CONTROL_POINT_DOCTRINE,
+  DRAFT_WATERMARK,
+  LOCKED_SEND_LABEL,
+  GAP_PREFIX,
+  FORBIDDEN_CEO_EDITION_TERMS,
+  SECTION_IDS,
+  SECTION_TITLES,
+  assembleScorecardDocument,
+  flattenDocumentText,
+  sectionOrderOf,
+  forbiddenCeoEditionHits,
+  emptyQc,
+} from "./scorecardExport";
+export type {
+  ScorecardDocument,
+  ScorecardSectionId,
+  ScorecardExportInput,
+  GapFlag,
+  ExportField,
+} from "./scorecardExport";
+
