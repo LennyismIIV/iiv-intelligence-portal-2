@@ -14,6 +14,7 @@ import Compare from "@/pages/Compare";
 import SearchPage from "@/pages/SearchPage";
 import Evaluations from "@/pages/Evaluations";
 import Findings from "@/pages/Findings";
+import ValuationTapePage from "@/pages/ValuationTape";
 
 function AppRouter() {
   return (
@@ -27,6 +28,7 @@ function AppRouter() {
           <Route path="/compare" component={Compare} />
           <Route path="/evaluations" component={Evaluations} />
           <Route path="/findings" component={Findings} />
+          <Route path="/valuation-tape" component={ValuationTapePage} />
           <Route path="/search" component={SearchPage} />
           <Route component={NotFound} />
         </Switch>
