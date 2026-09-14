@@ -14,6 +14,7 @@ import {
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { log } from "./index";
+import { parseExportQuery } from "./scorecardExportService";
 
 function buildCompanyPayload(item: any) {
   return {
@@ -1133,7 +1134,17 @@ export async function registerRoutes(
   app.get("/api/companies/:id/export/scorecard", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      res.json(await storage.exportScorecard(id));
+      const { format, draft } = parseExportQuery(req.query as Record<string, unknown>);
+      const result = await storage.exportGen2Scorecard(id, { format, draft });
+      if ("buffer" in result) {
+        res.setHeader("Content-Type", result.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${result.filename}"`);
+        res.setHeader("X-Scorecard-Edition", "gen2_ceo");
+        res.setHeader("X-Scorecard-Draft", result.json.draft ? "1" : "0");
+        if (result.pdfSource) res.setHeader("X-Scorecard-Pdf-Source", result.pdfSource);
+        return res.send(result.buffer);
+      }
+      res.json(result);
     } catch (err: any) {
       if (sendEvidenceError(err, res)) return;
       res.status(500).json({ message: err.message });

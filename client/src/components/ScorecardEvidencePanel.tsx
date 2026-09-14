@@ -156,25 +156,58 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
     },
   });
 
-  const exportScorecard = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("GET", `/api/companies/${company.id}/export/scorecard`);
-      return res.json();
-    },
-    onSuccess: (data) => {
+  const downloadExport = async (format: "docx" | "pdf" | "json", draft = false) => {
+    const qs = new URLSearchParams({ format });
+    if (draft) qs.set("draft", "1");
+    const res = await apiRequest("GET", `/api/companies/${company.id}/export/scorecard?${qs}`);
+    const slug = (company.name || "company").replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+    if (format === "json") {
+      const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `scorecard-${(company.name || "company").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.json`;
+      a.download = `gen2-ceo-scorecard-${slug}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast({ title: "Scorecard export downloaded" });
-    },
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const cd = res.headers.get("Content-Disposition");
+    const match = cd?.match(/filename="([^"]+)"/);
+    a.href = url;
+    a.download = match?.[1] ?? `gen2-ceo-scorecard-${slug}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportDocx = useMutation({
+    mutationFn: () => downloadExport("docx"),
+    onSuccess: () => toast({ title: "Gen2 CEO Scorecard DOCX downloaded" }),
     onError: (err: any) => {
       toast({ title: "Export blocked", description: err?.message || "QC failed", variant: "destructive" });
+    },
+  });
+
+  const exportPdf = useMutation({
+    mutationFn: () => downloadExport("pdf"),
+    onSuccess: () => toast({ title: "Locked-send PDF downloaded" }),
+    onError: (err: any) => {
+      toast({ title: "Export blocked", description: err?.message || "QC failed", variant: "destructive" });
+    },
+  });
+
+  const exportDraft = useMutation({
+    mutationFn: () => downloadExport("docx", true),
+    onSuccess: () => toast({ title: "Internal draft DOCX downloaded", description: "Watermarked — not for client send." }),
+    onError: (err: any) => {
+      toast({ title: "Draft export failed", description: err?.message || "Unknown error", variant: "destructive" });
     },
   });
 
@@ -223,8 +256,9 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
             </Badge>
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Fail-closed: export and ship stay red until every material claim has Evidence.grade and confidence.
-            Undisclosed / speculative is allowed when labeled.
+            Fail-closed: client DOCX / locked-send PDF stay red until every material claim has
+            Evidence.grade and confidence. Internal draft is watermarked and may include [GAP]
+            placeholders. Undisclosed / speculative is allowed when labeled.
           </p>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -260,12 +294,31 @@ export function ScorecardEvidencePanel({ company }: { company: Company }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => exportScorecard.mutate()}
-              disabled={!passed || exportScorecard.isPending}
+              onClick={() => exportDocx.mutate()}
+              disabled={!passed || exportDocx.isPending}
               data-testid="button-export-scorecard"
             >
               <Download className="w-3.5 h-3.5 mr-1.5" />
-              Export Scorecard
+              Export Gen2 DOCX
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => exportPdf.mutate()}
+              disabled={!passed || exportPdf.isPending}
+              data-testid="button-export-scorecard-pdf"
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Locked send PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => exportDraft.mutate()}
+              disabled={exportDraft.isPending}
+              data-testid="button-export-scorecard-draft"
+            >
+              Internal draft
             </Button>
             <Button
               size="sm"
