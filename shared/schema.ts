@@ -92,6 +92,7 @@ export const companies = sqliteTable("companies", {
   platformStage: text("platform_stage"),                // project_shop | productized_research | data_insight_platform | di_infrastructure
   vcControlLayers: text("vc_control_layers"),           // JSON array subset of VC1…VC5
   brandTags: text("brand_tags"),                        // JSON array: gen2_client | iiv_pipeline | greenbook_visible
+  iivVerdict: text("iiv_verdict").default("PENDING"),   // P3.6 IIV edition: INVEST | WATCH | PASS | PENDING
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -159,6 +160,7 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
   platformStage: true,
   vcControlLayers: true,
   brandTags: true,
+  iivVerdict: true,
 }).extend(scorecardFieldsSchema.shape);
 
 export const insertContactSchema = createInsertSchema(contacts).omit({
@@ -577,6 +579,17 @@ export {
   sectionOrderOf,
   forbiddenCeoEditionHits,
   emptyQc,
+  assembleIivVerdictDocument,
+  assembleSharedScorecardGraph,
+  IIV_SECTION_IDS,
+  IIV_SCORECARD_BRAND,
+  IIV_SCORECARD_EDITION,
+  IIV_SCORECARD_FORMAT,
+  IIV_PRODUCT_TITLE,
+  FORBIDDEN_IIV_EDITION_TERMS,
+  editionProductTitle,
+  editionHeaderLabel,
+  forbiddenIivEditionHits,
 } from "./scorecardExport";
 export type {
   ScorecardDocument,
@@ -584,5 +597,27 @@ export type {
   ScorecardExportInput,
   GapFlag,
   ExportField,
+  IivVerdictSection,
 } from "./scorecardExport";
+
+// ============================================================
+// P3.6 IIV verdict edition (same Scorecard graph as P3.5)
+// ============================================================
+export {
+  IIV_VERDICTS,
+  IIV_VERDICT_LABELS,
+  DEFAULT_IIV_VERDICT,
+  IivVerdictError,
+  parseIivVerdict,
+  normalizeStoredVerdict,
+  collectIivBlockers,
+  assertIivVerdictWritable,
+  isIivVerdict,
+} from "./scorecardVerdict";
+export type {
+  IivVerdict,
+  IivBlocker,
+  IivDecisionInput,
+  IivBlockerResult,
+} from "./scorecardVerdict";
 

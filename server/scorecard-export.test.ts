@@ -282,10 +282,11 @@ test("inconclusive AI result maps to Ambiguous; draft watermark is explicit", ()
   assert.equal(doc.draft, true);
 });
 
-test("parseExportQuery accepts format + draft", () => {
-  assert.deepEqual(parseExportQuery({}), { format: "json", draft: false });
-  assert.deepEqual(parseExportQuery({ format: "DOCX", draft: "1" }), { format: "docx", draft: true });
-  assert.deepEqual(parseExportQuery({ format: "pdf", draft: "true" }), { format: "pdf", draft: true });
+test("parseExportQuery accepts format + draft + edition", () => {
+  assert.deepEqual(parseExportQuery({}), { format: "json", draft: false, edition: "ceo" });
+  assert.deepEqual(parseExportQuery({ format: "DOCX", draft: "1" }), { format: "docx", draft: true, edition: "ceo" });
+  assert.deepEqual(parseExportQuery({ format: "pdf", draft: "true" }), { format: "pdf", draft: true, edition: "ceo" });
+  assert.deepEqual(parseExportQuery({ format: "docx", edition: "iiv" }), { format: "docx", draft: false, edition: "iiv" });
 });
 
 // --- Renderers

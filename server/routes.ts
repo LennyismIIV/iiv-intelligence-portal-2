@@ -10,6 +10,7 @@ import {
   ValuationTapeError,
   ValuationAssessmentError,
   ScorecardEvidenceError,
+  IivVerdictError,
 } from "@shared/schema";
 import { readFileSync } from "fs";
 import { resolve } from "path";
@@ -1131,15 +1132,31 @@ export async function registerRoutes(
     }
   });
 
+  app.put("/api/companies/:id/iiv-verdict", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = await storage.setIivVerdict(id, req.body?.verdict ?? req.body?.iivVerdict);
+      res.json(result);
+    } catch (err: any) {
+      if (err instanceof IivVerdictError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.extras });
+      }
+      if (err?.message === "Company not found") {
+        return res.status(404).json({ message: err.message });
+      }
+      res.status(400).json({ message: err.message });
+    }
+  });
+
   app.get("/api/companies/:id/export/scorecard", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { format, draft } = parseExportQuery(req.query as Record<string, unknown>);
-      const result = await storage.exportGen2Scorecard(id, { format, draft });
+      const { format, draft, edition } = parseExportQuery(req.query as Record<string, unknown>);
+      const result = await storage.exportGen2Scorecard(id, { format, draft, edition });
       if ("buffer" in result) {
         res.setHeader("Content-Type", result.contentType);
         res.setHeader("Content-Disposition", `attachment; filename="${result.filename}"`);
-        res.setHeader("X-Scorecard-Edition", "gen2_ceo");
+        res.setHeader("X-Scorecard-Edition", edition === "iiv" ? "iiv_verdict" : "gen2_ceo");
         res.setHeader("X-Scorecard-Draft", result.json.draft ? "1" : "0");
         if (result.pdfSource) res.setHeader("X-Scorecard-Pdf-Source", result.pdfSource);
         return res.send(result.buffer);

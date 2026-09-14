@@ -13,8 +13,9 @@ import {
 import {
   DRAFT_WATERMARK,
   INSTRUMENT_A_NAME,
-  SCORECARD_BRAND,
-  SCORECARD_EDITION,
+  IIV_SCORECARD_BRAND,
+  editionHeaderLabel,
+  editionProductTitle,
   type ExportField,
   type ScorecardDocument,
 } from "@shared/scorecardExport";
@@ -96,7 +97,7 @@ function headerFooterChildren(doc: ScorecardDocument, kind: "header" | "footer")
       new Paragraph({
         children: [
           new TextRun({
-            text: `${SCORECARD_BRAND}  ·  ${SCORECARD_EDITION} Reclassification Scorecard  ·  `,
+            text: `${editionHeaderLabel(doc)}  ·  `,
             bold: true,
             color: NAVY,
             font: "Calibri",
@@ -136,7 +137,7 @@ function headerFooterChildren(doc: ScorecardDocument, kind: "header" | "footer")
           size: 15,
         }),
         new TextRun({
-          text: `  ·  ${SCORECARD_BRAND}`,
+          text: `  ·  ${doc.brand}`,
           bold: true,
           color: NAVY,
           font: "Calibri",
@@ -162,7 +163,7 @@ function sectionChildren(doc: ScorecardDocument): Paragraph[] {
       spacing: { after: 60 },
       children: [
         new TextRun({
-          text: `${SCORECARD_BRAND} CEO Reclassification Scorecard`,
+          text: editionProductTitle(doc),
           bold: true,
           color: NAVY,
           font: "Calibri",
@@ -210,7 +211,7 @@ function sectionChildren(doc: ScorecardDocument): Paragraph[] {
         fieldParagraph(doc.header.scoredAt),
         fieldParagraph(doc.header.tapeAsOf),
         fieldParagraph(doc.header.brand),
-        bodyParagraph(`Edition: ${SCORECARD_EDITION}`),
+        bodyParagraph(`Edition: ${doc.edition}`),
         fieldParagraph(doc.header.evaluator),
         fieldParagraph(doc.header.confidenceRollup),
       );
@@ -263,6 +264,17 @@ function sectionChildren(doc: ScorecardDocument): Paragraph[] {
         fieldParagraph(doc.trifecta.investor),
         ...doc.trifecta.agenda.map(fieldParagraph),
       );
+    } else if (section.id === "iiv_verdict" && doc.verdict) {
+      out.push(
+        bodyParagraph(
+          "IIV IC verdict. Open critical Findings, failed Gates, and DimensionFloors (when recorded) are listed as blockers — never invented.",
+          { italics: true, color: MUTED },
+        ),
+        fieldParagraph(doc.verdict.verdict),
+        fieldParagraph(doc.verdict.investWritable),
+        ...doc.verdict.blockers.map(fieldParagraph),
+        ...(doc.verdict.ledgerPresent ? doc.verdict.gaps.map(fieldParagraph) : []),
+      );
     } else if (section.id === "evidence_appendix") {
       for (const row of doc.appendix) {
         out.push(
@@ -291,9 +303,10 @@ function sectionChildren(doc: ScorecardDocument): Paragraph[] {
 }
 
 export function buildScorecardDocx(doc: ScorecardDocument): Document {
+  const portal = doc.brand === IIV_SCORECARD_BRAND ? "IIV Intelligence Portal" : "Gen2 Portal";
   return new Document({
-    creator: `${SCORECARD_BRAND} Portal`,
-    title: `${SCORECARD_BRAND} ${SCORECARD_EDITION} Scorecard — ${doc.firmName}`,
+    creator: portal,
+    title: `${editionProductTitle(doc)} — ${doc.firmName}`,
     description: INSTRUMENT_A_NAME,
     styles: {
       default: {

@@ -19,6 +19,13 @@ import {
   VALUATION_TAPE_CREATE_SQL,
   VALUATION_ASSESSMENT_CREATE_SQL,
   SCORECARD_EVIDENCE_CREATE_SQL,
+  parseIivVerdict,
+  assertIivVerdictWritable,
+  collectIivBlockers,
+  normalizeStoredVerdict,
+  type IivVerdict,
+  type IivBlocker,
+  type IivDecisionInput,
 } from "@shared/schema";
 import { createValuationTapeService, type ValuationTape, type CurrentTapeResult } from "./valuationTapeService";
 import { createValuationAssessmentService, type ValuationAssessment } from "./valuationAssessmentService";
@@ -26,6 +33,7 @@ import { createScorecardEvidenceService } from "./scorecardEvidenceService";
 import {
   createSqliteScorecardExportService,
   type ScorecardBinaryExport,
+  type ScorecardExportEdition,
   type ScorecardExportFormat,
   type ScorecardExportJson,
 } from "./scorecardExportService";
@@ -199,6 +207,7 @@ try {
   if (!has("platform_stage")) sqlite.exec("ALTER TABLE companies ADD COLUMN platform_stage TEXT");
   if (!has("vc_control_layers")) sqlite.exec("ALTER TABLE companies ADD COLUMN vc_control_layers TEXT");
   if (!has("brand_tags")) sqlite.exec("ALTER TABLE companies ADD COLUMN brand_tags TEXT");
+  if (!has("iiv_verdict")) sqlite.exec("ALTER TABLE companies ADD COLUMN iiv_verdict TEXT DEFAULT 'PENDING'");
 } catch (e) {
   console.error("[storage] Failed to add CRM/financial/scorecard columns:", e);
 }
@@ -336,6 +345,14 @@ export interface IStorage {
     dimensionFloors: DimensionFloor[];
     canWriteInvestVerdict: boolean;
     blockingReasons: string[];
+    iivVerdict: IivVerdict;
+    iivBlockers: IivBlocker[];
+    iivGaps: IivBlocker[];
+  }>;
+  setIivVerdict(companyId: number, verdict: unknown): Promise<{
+    iivVerdict: IivVerdict;
+    canWriteInvestVerdict: boolean;
+    blockers: IivBlocker[];
   }>;
 
   // P3.2 ValuationTape
@@ -369,7 +386,7 @@ export interface IStorage {
   assertScorecardExportAllowed(companyId: number, pathway: "export" | "ship"): Promise<ScorecardQcResult>;
   exportGen2Scorecard(
     companyId: number,
-    opts?: { format?: ScorecardExportFormat; draft?: boolean },
+    opts?: { format?: ScorecardExportFormat; draft?: boolean; edition?: ScorecardExportEdition },
   ): Promise<ScorecardExportJson | ScorecardBinaryExport>;
 }
 
@@ -983,6 +1000,27 @@ export class DatabaseStorage implements IStorage {
 
     const canWriteInvestVerdict = blockingReasons.length === 0;
 
+    const firm = db.select({ iivVerdict: companies.iivVerdict }).from(companies)
+      .where(eq(companies.id, companyId))
+      .get();
+    const decision: IivDecisionInput = {
+      findings: companyFindings.map((f) => ({
+        id: f.id,
+        findingText: f.findingText,
+        severity: f.severity,
+        status: f.status,
+      })),
+      gates: companyGates.map((g) => ({ gateId: g.gateId, status: g.status })),
+      dimensionFloors: companyFloors.map((f) => ({
+        id: f.id,
+        lensType: f.lensType,
+        dimension: f.dimension,
+        cappedAt: f.cappedAt,
+        reason: f.reason,
+      })),
+    };
+    const iiv = collectIivBlockers(decision);
+
     return {
       gates: companyGates,
       openFindingsBySeverity,
@@ -991,6 +1029,48 @@ export class DatabaseStorage implements IStorage {
       dimensionFloors: companyFloors,
       canWriteInvestVerdict,
       blockingReasons,
+      iivVerdict: normalizeStoredVerdict(firm?.iivVerdict),
+      iivBlockers: iiv.blockers,
+      iivGaps: iiv.gaps,
+    };
+  }
+
+  async setIivVerdict(companyId: number, verdictRaw: unknown): Promise<{
+    iivVerdict: IivVerdict;
+    canWriteInvestVerdict: boolean;
+    blockers: IivBlocker[];
+  }> {
+    const existing = await this.getCompany(companyId);
+    if (!existing) {
+      throw new Error("Company not found");
+    }
+    const verdict = parseIivVerdict(verdictRaw);
+    const summary = await this.getCompanyDecisionSummary(companyId);
+    const decision: IivDecisionInput = {
+      findings: (await this.getFindings(companyId)).map((f) => ({
+        id: f.id,
+        findingText: f.findingText,
+        severity: f.severity,
+        status: f.status,
+      })),
+      gates: summary.gates.map((g) => ({ gateId: g.gateId, status: g.status })),
+      dimensionFloors: summary.dimensionFloors.map((f) => ({
+        id: f.id,
+        lensType: f.lensType,
+        dimension: f.dimension,
+        cappedAt: f.cappedAt,
+        reason: f.reason,
+      })),
+    };
+    const checked = assertIivVerdictWritable(verdict, decision);
+    db.update(companies)
+      .set({ iivVerdict: verdict, updatedAt: new Date().toISOString() } as any)
+      .where(eq(companies.id, companyId))
+      .run();
+    return {
+      iivVerdict: verdict,
+      canWriteInvestVerdict: !checked.investHardBlocked,
+      blockers: checked.blockers,
     };
   }
 
@@ -1087,7 +1167,7 @@ export class DatabaseStorage implements IStorage {
 
   async exportGen2Scorecard(
     companyId: number,
-    opts: { format?: ScorecardExportFormat; draft?: boolean } = {},
+    opts: { format?: ScorecardExportFormat; draft?: boolean; edition?: ScorecardExportEdition } = {},
   ) {
     return scorecardExportService.exportScorecard(companyId, opts);
   }
