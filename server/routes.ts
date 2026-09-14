@@ -9,6 +9,7 @@ import {
   applyScorecardValidation,
   ValuationTapeError,
   ValuationAssessmentError,
+  ScorecardEvidenceError,
 } from "@shared/schema";
 import { readFileSync } from "fs";
 import { resolve } from "path";
@@ -594,11 +595,14 @@ export async function registerRoutes(
       const company = await storage.getCompany(id);
       if (!company) return res.status(404).json({ message: "Company not found" });
 
-      const [scores, interactions, files, diligence] = await Promise.all([
+      const qc = await storage.assertScorecardExportAllowed(id, "export");
+
+      const [scores, interactions, files, diligence, evidence] = await Promise.all([
         storage.getEvaluationScores(id),
         storage.getCompanyInteractions(id),
         storage.getCompanyFiles(id),
         storage.getLatestDiligenceResponse(id),
+        storage.listScorecardEvidence(id),
       ]);
 
       // Group scores by lensType for readability.
@@ -631,8 +635,13 @@ export async function registerRoutes(
         diligence: diligenceParsed,
         interactions,
         files,
+        qc,
+        evidence,
       });
     } catch (err: any) {
+      if (err instanceof ScorecardEvidenceError) {
+        return res.status(err.statusCode).json({ message: err.message, ...err.extras });
+      }
       res.status(500).json({ message: err.message });
     }
   });
@@ -1066,6 +1075,77 @@ export async function registerRoutes(
       res.json({ ok: true });
     } catch (err: any) {
       if (sendAssessmentError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ============================================================
+  // P3.4 Scorecard Evidence — grade + confidence + fail-closed QC
+  // ============================================================
+  function sendEvidenceError(err: unknown, res: import("express").Response): boolean {
+    if (err instanceof ScorecardEvidenceError) {
+      res.status(err.statusCode).json({ message: err.message, ...err.extras });
+      return true;
+    }
+    return false;
+  }
+
+  app.get("/api/companies/:id/evidence", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      res.json(await storage.listScorecardEvidence(id));
+    } catch (err: any) {
+      if (sendEvidenceError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/companies/:id/evidence", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      res.json(await storage.upsertScorecardEvidence(id, req.body || {}));
+    } catch (err: any) {
+      if (sendEvidenceError(err, res)) return;
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/companies/:id/evidence/batch", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      res.json(await storage.upsertScorecardEvidenceBatch(id, req.body?.items ?? req.body));
+    } catch (err: any) {
+      if (sendEvidenceError(err, res)) return;
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/companies/:id/scorecard-qc", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      res.json(await storage.getScorecardQc(id));
+    } catch (err: any) {
+      if (sendEvidenceError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/companies/:id/export/scorecard", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      res.json(await storage.exportScorecard(id));
+    } catch (err: any) {
+      if (sendEvidenceError(err, res)) return;
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/companies/:id/ship", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      res.json(await storage.shipScorecard(id));
+    } catch (err: any) {
+      if (sendEvidenceError(err, res)) return;
       res.status(500).json({ message: err.message });
     }
   });

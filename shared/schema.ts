@@ -500,3 +500,59 @@ export const valuationAssessments = sqliteTable("valuation_assessments", {
 
 export type ValuationAssessmentRow = typeof valuationAssessments.$inferSelect;
 
+// ============================================================
+// P3.4 Scorecard Evidence (grade + confidence on material claims)
+// ============================================================
+export {
+  EVIDENCE_GRADES,
+  EVIDENCE_GRADE_LABELS,
+  EVIDENCE_CONFIDENCE,
+  EVIDENCE_CONFIDENCE_LABELS,
+  MATERIAL_CLAIM_KEYS,
+  MATERIAL_CLAIM_LABELS,
+  FIRM_CLAIM_KEYS,
+  ASSESSMENT_CLAIM_KEYS,
+  CONTROL_POINT_VALUES,
+  CONTROL_POINT_LABELS,
+  AI_ON_CONTROL_POINT_RESULTS,
+  SCORECARD_EVIDENCE_CREATE_SQL,
+  ScorecardEvidenceError,
+  parseClaimKey,
+  parseGrade,
+  parseConfidence,
+  isGen2VaultPath,
+  assertNoGen2VaultOnGreenbookVisible,
+  parseEvidenceWrite,
+  evaluateScorecardQc,
+  qcBlockedError,
+  isAssessmentClaim,
+} from "./scorecardEvidence";
+export type {
+  EvidenceGrade,
+  EvidenceConfidence,
+  MaterialClaimKey,
+  ControlPointValue,
+  AiOnControlPointResult,
+  EvidenceRecord,
+  ScorecardQcResult,
+  QcClaimStatus,
+} from "./scorecardEvidence";
+
+export const scorecardEvidence = sqliteTable("scorecard_evidence", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  assessmentId: integer("assessment_id"),
+  claimKey: text("claim_key").notNull(),
+  grade: text("grade").notNull(),
+  confidence: text("confidence").notNull(),
+  claimValue: text("claim_value"),
+  notes: text("notes"),
+  sourceUrl: text("source_url"),
+  greenbookVisible: integer("greenbook_visible").notNull().default(0),
+  createdBy: text("created_by"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type ScorecardEvidenceRow = typeof scorecardEvidence.$inferSelect;
+
