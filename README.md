@@ -35,10 +35,14 @@ git push -u origin main
    - One 1 GB persistent disk (`iiv-data`) mounted at `/data`
    - Build: `npm install && npm run build`
    - Start: `npm start`
-   - Env vars: `NODE_ENV=production`, `DB_PATH=/data/iiv.db`, `NODE_VERSION=20.18.0`
+   - Env vars: `NODE_ENV=production`, `DB_PATH=/data/iiv.db`, `NODE_VERSION=20.18.0`, and **`IIV_AUTH_SECRET`** (you type this in; it is not in git)
 4. Click **Apply**. First build takes ~3–5 minutes.
 
 When the build finishes, Render gives you a URL like `https://iiv-intelligence-portal.onrender.com`. That's your live portal.
+
+**Set `IIV_AUTH_SECRET` before this version boots.** The service exits on startup if it is missing, so the API is never left open. In the Render dashboard → your service → **Environment**, add `IIV_AUTH_SECRET` to a long random value (`openssl rand -base64 24`). `render.yaml` declares the key with `sync: false`, which means Render will not invent or commit the value. An existing service does not pick the new variable up by itself: add it, then deploy. If the new instance crashes before it listens, Render's health check should keep the previous deploy running until the secret is set.
+
+Sign in at the portal with that password and your name (that name is stored as the evaluator on new scores). Scripts call the API with `Authorization: Bearer <IIV_AUTH_SECRET>` or `X-API-Key: <IIV_AUTH_SECRET>`. See [Authentication](#authentication) below.
 
 ### 3. (Optional) Custom domain
 
@@ -82,6 +86,38 @@ npm start            # http://localhost:5000
 ```
 
 The default `DB_PATH` is `./data.db` (relative to the project root) — same file that's committed and used as the seed.
+
+Copy `.env.example` to `.env` and set `IIV_AUTH_SECRET` before `npm run dev`. The process reads `.env` on startup and will not override variables you already exported. It exits if `IIV_AUTH_SECRET` is missing.
+
+---
+
+## Authentication
+
+Every `/api` route except `GET /api/auth/me`, `POST /api/auth/login`, and `POST /api/auth/logout` requires either a signed-in session or the API key. The HTML shell at `/` still loads so the login screen can render; company and score data is not in that file.
+
+| Variable | Required | What it does |
+| --- | --- | --- |
+| `IIV_AUTH_SECRET` | yes | API key (`Authorization: Bearer …` or `X-API-Key`). Also the shared login password when `IIV_USERS` is unset. Minimum 8 characters. |
+| `IIV_USERS` | no | Named accounts, `username:password,username2:password2`. When set, the login form asks for username and password, and `IIV_AUTH_SECRET` is **only** the API key. |
+| `IIV_SESSION_SECRET` | no | Signs the `iiv.sid` cookie. Defaults to `IIV_AUTH_SECRET`. |
+
+Shared-password login (no `IIV_USERS`): the form asks for a name and the secret. That name is the user id. New scores, gates, findings, diligence, interactions, and valuation assessments written in that session are attributed to it instead of a random `localStorage` label. Named accounts use the username as that id.
+
+The session cookie is httpOnly, SameSite=Lax, and `Secure` when the request is HTTPS (Render's proxy is trusted). It lasts 7 days. Signing out calls `POST /api/auth/logout`.
+
+```bash
+# browser-equivalent API call
+curl -H "Authorization: Bearer $IIV_AUTH_SECRET" https://your-portal.example/api/companies
+
+# or
+curl -H "X-API-Key: $IIV_AUTH_SECRET" https://your-portal.example/api/companies
+```
+
+API-key calls are a service principal (`id: "api-key"`). They do not rewrite an `evaluatorId` you send, so a script can still record a person. A logged-in session does: if the body includes an evaluator id, it is replaced with the signed-in user. IIC saves that omit `evaluatorId` stay omit-and-insert; that replace-versus-duplicate behavior is unchanged.
+
+Unknown `/api/...` paths return `404` JSON (`{"message":"Not found"}`). Any other path still falls through to the app.
+
+**Deploy note:** add `IIV_AUTH_SECRET` on the Render service before this version goes out. Without it the new process exits and will not pass the `/` health check.
 
 ---
 

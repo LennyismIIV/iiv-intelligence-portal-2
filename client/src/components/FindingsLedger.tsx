@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useEvaluatorId } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
   FINDING_STATUSES,
@@ -34,17 +35,6 @@ import { Plus, Trash2, AlertTriangle } from "lucide-react";
 
 interface Props {
   companyId: number;
-}
-
-function getOrCreateEvaluatorId(): string {
-  if (typeof window === "undefined") return "anon";
-  const KEY = "iiv_evaluator_id";
-  let id = window.localStorage.getItem(KEY);
-  if (!id) {
-    id = "judge-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    window.localStorage.setItem(KEY, id);
-  }
-  return id;
 }
 
 const STATUS_LABEL: Record<FindingStatus, string> = {
@@ -76,7 +66,7 @@ function isOpen(status: string): boolean {
 
 export function FindingsLedger({ companyId }: Props) {
   const { toast } = useToast();
-  const evaluatorId = useMemo(() => getOrCreateEvaluatorId(), []);
+  const evaluatorId = useEvaluatorId();
 
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState({

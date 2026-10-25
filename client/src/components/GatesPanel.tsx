@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,23 +10,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useEvaluatorId } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { GATE_IDS, GATE_STATUSES, type Gate, type GateId, type GateStatus } from "@shared/schema";
 import { ShieldCheck, ShieldAlert, Shield } from "lucide-react";
 
 interface Props {
   companyId: number;
-}
-
-function getOrCreateEvaluatorId(): string {
-  if (typeof window === "undefined") return "anon";
-  const KEY = "iiv_evaluator_id";
-  let id = window.localStorage.getItem(KEY);
-  if (!id) {
-    id = "judge-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    window.localStorage.setItem(KEY, id);
-  }
-  return id;
 }
 
 const GATE_LABEL: Record<GateId, string> = {
@@ -57,7 +46,7 @@ function iconFor(status: GateStatus | undefined) {
 
 export function GatesPanel({ companyId }: Props) {
   const { toast } = useToast();
-  const evaluatorId = useMemo(() => getOrCreateEvaluatorId(), []);
+  const evaluatorId = useEvaluatorId();
 
   const gatesQuery = useQuery<Gate[]>({
     queryKey: ["/api/companies", companyId, "gates"],

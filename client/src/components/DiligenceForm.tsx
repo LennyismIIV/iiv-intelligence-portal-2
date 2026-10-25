@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Card,
@@ -22,25 +22,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useEvaluatorId } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { History, Save } from "lucide-react";
 
 interface Props {
   companyId: number;
-}
-
-// Per-judge identity (localStorage UUID) — same pattern as LensSelector.
-function getOrCreateEvaluatorId(): string {
-  const key = "iiv_evaluator_id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = (crypto as any).randomUUID
-      ? (crypto as any).randomUUID()
-      : `judge-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(key, id);
-  }
-  return id;
 }
 
 // 19 diligence questions, verbatim, grouped into logical sections.
@@ -142,7 +130,7 @@ function safeParse(s: string): Record<string, string> {
 
 export function DiligenceForm({ companyId }: Props) {
   const { toast } = useToast();
-  const evaluatorId = useMemo(() => getOrCreateEvaluatorId(), []);
+  const evaluatorId = useEvaluatorId();
 
   // Server-side history (newest first). Latest is rows[0].
   const historyQuery = useQuery<DiligenceRow[]>({
@@ -238,7 +226,7 @@ export function DiligenceForm({ companyId }: Props) {
                     try { return format(new Date(latest.updatedAt), "MMM d, yyyy 'at' h:mm a"); }
                     catch { return latest.updatedAt; }
                   })() : "—"}
-                  {latest.filledBy ? ` by ${latest.filledBy.slice(0, 8)}…` : ""}
+                  {latest.filledBy ? ` by ${latest.filledBy}` : ""}
                 </span>
               ) : (
                 <span>No saved version yet</span>
@@ -371,7 +359,7 @@ export function DiligenceForm({ companyId }: Props) {
                     </div>
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    by {v.filledBy ? v.filledBy.slice(0, 8) + "…" : "team"}
+                    by {v.filledBy || "team"}
                   </div>
                 </button>
               ))}
@@ -387,7 +375,7 @@ export function DiligenceForm({ companyId }: Props) {
                       catch { return viewingVersion.updatedAt; }
                     })() : "—"}
                     {" • "}
-                    by {viewingVersion.filledBy ? viewingVersion.filledBy.slice(0, 8) + "…" : "team"}
+                    by {viewingVersion.filledBy || "team"}
                   </div>
                 </div>
                 <Button

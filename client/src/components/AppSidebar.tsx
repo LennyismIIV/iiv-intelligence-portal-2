@@ -1,9 +1,10 @@
 import { Link, useLocation } from "wouter";
 import { IIVLogoFull, IIVLogo } from "./IIVLogo";
-import { LayoutDashboard, Building2, GitCompareArrows, Search, Moon, Sun, PanelLeftClose, PanelLeft, Trophy, AlertTriangle, LineChart } from "lucide-react";
+import { LayoutDashboard, Building2, GitCompareArrows, Search, Moon, Sun, PanelLeftClose, PanelLeft, Trophy, AlertTriangle, LineChart, LogOut } from "lucide-react";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -19,6 +20,7 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const { user, logout } = useAuth();
 
   return (
     <aside
@@ -64,6 +66,21 @@ export function AppSidebar() {
 
       {/* Bottom actions */}
       <div className="p-2 border-t border-sidebar-border space-y-1">
+        {user && !collapsed && (
+          <div className="px-3 py-2 text-xs text-sidebar-foreground/70 truncate" title={user.name} data-testid="sidebar-user">
+            {user.name}
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => { void logout(); }}
+          data-testid="logout"
+          className="w-full justify-start gap-3 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+        >
+          <LogOut size={18} />
+          {!collapsed && <span>Sign out</span>}
+        </Button>
         <Button
           variant="ghost"
           size="sm"

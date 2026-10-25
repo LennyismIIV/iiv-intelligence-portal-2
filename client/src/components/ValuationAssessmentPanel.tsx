@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
+import { useEvaluatorId } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import type { Company } from "@shared/schema";
 import {
@@ -78,17 +79,6 @@ interface Assessment {
   } | null;
 }
 
-function getOrCreateEvaluatorId(): string {
-  if (typeof window === "undefined") return "anon";
-  const KEY = "iiv_evaluator_id";
-  let id = window.localStorage.getItem(KEY);
-  if (!id) {
-    id = "judge-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    window.localStorage.setItem(KEY, id);
-  }
-  return id;
-}
-
 function fmtTriple(t?: { low: number; median?: number; high: number }) {
   if (!t) return "—";
   return t.median != null ? `${t.low} / ${t.median} / ${t.high}` : `${t.low}–${t.high}`;
@@ -107,7 +97,7 @@ function asCoord(value: unknown): number {
 export function ValuationAssessmentPanel({ company }: { company: Company }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const evaluatorId = useMemo(() => getOrCreateEvaluatorId(), []);
+  const evaluatorId = useEvaluatorId();
 
   const { data: currentTape } = useQuery<CurrentTapeResult>({
     queryKey: ["/api/valuation-tapes/current"],

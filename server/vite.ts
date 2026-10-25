@@ -5,6 +5,7 @@ import viteConfig from "../vite.config";
 import fs from "fs";
 import path from "path";
 import { nanoid } from "nanoid";
+import { isApiPath, sendApiNotFound } from "./httpGuards";
 
 const viteLogger = createLogger();
 
@@ -32,6 +33,10 @@ export async function setupVite(server: Server, app: Express) {
   app.use(vite.middlewares);
 
   app.use("/{*path}", async (req, res, next) => {
+    if (isApiPath(req.path)) {
+      sendApiNotFound(res);
+      return;
+    }
     const url = req.originalUrl;
 
     try {

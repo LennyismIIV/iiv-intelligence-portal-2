@@ -6,6 +6,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme";
 import { AppSidebar } from "@/components/AppSidebar";
+import { IIVLogo } from "@/components/IIVLogo";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import { LoginPage } from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/Dashboard";
 import Companies from "@/pages/Companies";
@@ -37,17 +40,32 @@ function AppRouter() {
   );
 }
 
+function AuthenticatedApp() {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <IIVLogo size={48} className="text-primary" />
+      </div>
+    );
+  }
+  if (!user) return <LoginPage />;
+  return <AppRouter />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <ThemeProvider>
-          <Toaster />
-          <Router hook={useHashLocation}>
-            <AppRouter />
-          </Router>
-        </ThemeProvider>
-      </TooltipProvider>
+      <AuthProvider>
+        <TooltipProvider>
+          <ThemeProvider>
+            <Toaster />
+            <Router hook={useHashLocation}>
+              <AuthenticatedApp />
+            </Router>
+          </ThemeProvider>
+        </TooltipProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

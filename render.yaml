@@ -28,6 +28,16 @@ services:
         value: "false"          # ensures devDependencies (tsx, vite, esbuild, typescript) install during build
       - key: DB_PATH
         value: /data/iiv.db    # SQLite file lives on the persistent disk
+      # Required. The process refuses to boot without this, so the API is never
+      # left open. Set the value in the Render dashboard (it is not stored in git).
+      # Existing services must add it before this version deploys; a crash before
+      # listen fails the health check and should leave the previous deploy in place.
+      - key: IIV_AUTH_SECRET
+        sync: false
+      # Optional. username:password,username2:password2 — see README.
+      # When set, browser login uses these accounts and IIV_AUTH_SECRET is the API key only.
+      # - key: IIV_USERS
+      #   sync: false
     disk:
       name: iiv-data
       mountPath: /data         # must match the directory in DB_PATH above
