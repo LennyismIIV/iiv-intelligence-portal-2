@@ -15,6 +15,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { EvaluationScore, Company } from "@shared/schema";
 import { ValuationLens } from "@/components/ValuationLens";
+import { useEvaluatorId } from "@/lib/auth";
 
 interface LensSelectorProps {
   companyId: number;
@@ -272,18 +273,6 @@ const AI_STANCE_STYLES: Record<string, { badge: string; card: string; label: str
   avoid: { badge: "bg-red-100 text-red-800 border-red-300", card: "border-red-200 bg-red-50", label: "Avoid" },
 };
 
-// Stable evaluator id stored in localStorage. Same browser = same judge identity.
-function getOrCreateEvaluatorId(): string {
-  if (typeof window === "undefined") return "anon";
-  const KEY = "iiv_evaluator_id";
-  let id = window.localStorage.getItem(KEY);
-  if (!id) {
-    id = "judge-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    window.localStorage.setItem(KEY, id);
-  }
-  return id;
-}
-
 export function LensSelector({ companyId, companyName }: LensSelectorProps) {
   const { toast } = useToast();
   const [activeLens, setActiveLens] = useState<"iic" | "thesis" | "grid" | "momentum" | "grit" | "diligence" | "ai-native" | "valuation" | "founder">("iic");
@@ -291,7 +280,7 @@ export function LensSelector({ companyId, companyName }: LensSelectorProps) {
   const [notes, setNotes] = useState<Record<string, string>>({});
 
   // ---- Founder lens state (per-judge, per-company persistence) ----
-  const evaluatorId = useMemo(() => getOrCreateEvaluatorId(), []);
+  const evaluatorId = useEvaluatorId();
   const [founderScores, setFounderScores] = useState<Record<string, number>>({});
   const [founderNA, setFounderNA] = useState<Record<string, boolean>>({});
   const [founderNotes, setFounderNotes] = useState<Record<string, string>>({});

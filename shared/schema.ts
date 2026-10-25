@@ -287,7 +287,7 @@ export const diligenceResponses = sqliteTable("diligence_responses", {
   companyId: integer("company_id").notNull().references(() => companies.id),
   version: integer("version").notNull().default(1),
   responses: text("responses").notNull(),  // JSON string keyed by question id (q1..q19)
-  filledBy: text("filled_by"),             // evaluatorId (localStorage UUID)
+  filledBy: text("filled_by"),             // signed-in user id (or API-supplied label)
   isExternal: integer("is_external").default(0),
   notes: text("notes"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),

@@ -182,6 +182,7 @@ export default function ValuationTapePage() {
       if (!overrideAck) throw new Error("Check the override flag to select an expired or superseded tape as current.");
       const res = await fetch(
         `/api/valuation-tapes/current?tapeId=${encodeURIComponent(overrideTape.tapeId)}&override=1`,
+        { credentials: "include" },
       );
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || res.statusText);

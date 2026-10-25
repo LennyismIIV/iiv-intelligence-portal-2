@@ -14,8 +14,10 @@ import {
 } from "@shared/schema";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { log } from "./index";
+import { log } from "./log";
 import { parseExportQuery } from "./scorecardExportService";
+import { actorId, installAuth, pinEvaluatorIfPresent, sessionActor } from "./auth";
+import { isApiPath, sendApiNotFound } from "./httpGuards";
 
 function buildCompanyPayload(item: any) {
   return {
@@ -189,6 +191,11 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Auth must be installed before routes are registered. installAuth wraps
+  // app.get/post/patch/put/delete so every later /api handler requires a session
+  // or API key. /api/auth/login, /api/auth/logout, and /api/auth/me stay public.
+  installAuth(app);
+
   // Seed on startup
   await seedDatabase();
 
@@ -383,10 +390,15 @@ export async function registerRoutes(
   app.post("/api/companies/:id/scores", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const scoreData = { ...req.body, companyId: id };
+      const scoreData: Record<string, unknown> = { ...req.body, companyId: id };
+      // Pin a supplied evaluator to the signed-in user. Leave a missing
+      // evaluatorId missing so the legacy IIC insert-only path stays insert-only.
+      const pinned = pinEvaluatorIfPresent(req, scoreData.evaluatorId);
+      if (pinned) scoreData.evaluatorId = pinned;
+      else delete scoreData.evaluatorId;
       const score = scoreData.evaluatorId
-        ? await storage.upsertEvaluationScore(scoreData)
-        : await storage.createEvaluationScore(scoreData);
+        ? await storage.upsertEvaluationScore(scoreData as any)
+        : await storage.createEvaluationScore(scoreData as any);
       res.status(201).json(score);
     } catch (err: any) {
       res.status(400).json({ message: err.message });
@@ -397,7 +409,9 @@ export async function registerRoutes(
   app.get("/api/companies/:id/founder-session", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const evaluatorId = req.query.evaluatorId as string | undefined;
+      // Signed-in users read their own session. API-key callers pass evaluatorId.
+      const actor = sessionActor(req);
+      const evaluatorId = actor ? actor.id : (req.query.evaluatorId as string | undefined);
       if (!evaluatorId) {
         return res.status(400).json({ message: "evaluatorId query param required" });
       }
@@ -413,7 +427,8 @@ export async function registerRoutes(
   app.put("/api/companies/:id/founder-session", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { evaluatorId, architecture, stage } = req.body || {};
+      const { architecture, stage } = req.body || {};
+      const evaluatorId = actorId(req, req.body?.evaluatorId);
       if (!evaluatorId) {
         return res.status(400).json({ message: "evaluatorId required" });
       }
@@ -498,7 +513,7 @@ export async function registerRoutes(
         type,
         notes: notes || null,
         transcriptUrl: transcriptUrl || null,
-        createdBy: createdBy || "team",
+        createdBy: actorId(req, createdBy, "team"),
       });
       res.status(201).json(interaction);
     } catch (err: any) {
@@ -533,7 +548,7 @@ export async function registerRoutes(
         driveFileId,
         driveUrl,
         mimeType: mimeType || null,
-        uploadedBy: uploadedBy || "team",
+        uploadedBy: actorId(req, uploadedBy, "team"),
       });
       res.status(201).json(file);
     } catch (err: any) {
@@ -570,7 +585,7 @@ export async function registerRoutes(
         companyId: id,
         version: nextVersion,
         responses: JSON.stringify(responses),
-        filledBy: filledBy || "team",
+        filledBy: actorId(req, filledBy, "team"),
         isExternal: 0,
         notes: notes || null,
       });
@@ -788,7 +803,7 @@ export async function registerRoutes(
         gateId,
         status: status || "open",
         triggerEvent: triggerEvent ?? null,
-        evaluator: evaluator ?? null,
+        evaluator: actorId(req, evaluator),
         reEvaluationTriggers: reEvaluationTriggers
           ? (typeof reEvaluationTriggers === "string" ? reEvaluationTriggers : JSON.stringify(reEvaluationTriggers))
           : null,
@@ -823,7 +838,7 @@ export async function registerRoutes(
       const payload = insertDimensionFloorSchema.parse({
         companyId, lensType, dimension, cappedAt, reason,
         evidenceRef: evidenceRef ?? null,
-        createdBy: createdBy ?? null,
+        createdBy: actorId(req, createdBy),
       });
       const saved = await storage.upsertDimensionFloor(payload);
       res.json(saved);
@@ -875,7 +890,7 @@ export async function registerRoutes(
         owner: owner ?? null,
         deadline: deadline ?? null,
         resolutionNote: resolutionNote ?? null,
-        raisedBy: raisedBy ?? null,
+        raisedBy: actorId(req, raisedBy),
       });
       const saved = await storage.createFinding(payload);
       res.json(saved);
@@ -1037,7 +1052,10 @@ export async function registerRoutes(
   app.post("/api/companies/:id/assessments", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const saved = await storage.createValuationAssessment(id, req.body || {});
+      const body = { ...(req.body || {}) };
+      const actor = sessionActor(req);
+      if (actor) body.evaluatorId = actor.id;
+      const saved = await storage.createValuationAssessment(id, body);
       res.status(201).json(saved);
     } catch (err: any) {
       if (sendAssessmentError(err, res)) return;
@@ -1186,6 +1204,13 @@ export async function registerRoutes(
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
+  });
+
+  // Unknown /api paths must not fall through to the SPA (which returns HTML 200).
+  // Registered last so real /api routes above still match.
+  app.use((req, res, next) => {
+    if (!isApiPath(req.path)) return next();
+    sendApiNotFound(res);
   });
 
   return httpServer;

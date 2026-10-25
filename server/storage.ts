@@ -663,11 +663,14 @@ export class DatabaseStorage implements IStorage {
 
   // Evaluation Lenses (Phase 1+)
   async getEvaluationScores(companyId: number, lensType?: string): Promise<EvaluationScore[]> {
-    let query = db.select().from(evaluationScores).where(eq(evaluationScores.companyId, companyId));
-    if (lensType) {
-      query = query.where(eq(evaluationScores.lensType, lensType));
-    }
-    return query.orderBy(desc(evaluationScores.createdAt)).all();
+    // Drizzle's QueryBuilder.where() replaces the previous clause. A second
+    // .where(lens) dropped companyId and returned that lens for every company.
+    const filters = [eq(evaluationScores.companyId, companyId)];
+    if (lensType) filters.push(eq(evaluationScores.lensType, lensType));
+    return db.select().from(evaluationScores)
+      .where(and(...filters))
+      .orderBy(desc(evaluationScores.createdAt))
+      .all();
   }
 
   async createEvaluationScore(score: InsertEvaluationScore): Promise<EvaluationScore> {
